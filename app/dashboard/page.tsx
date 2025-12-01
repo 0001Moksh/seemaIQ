@@ -88,12 +88,12 @@ export default function DashboardPage() {
 
       {/* Header */}
       <header className="border-b border-border top-0 z-50 bg-secondary/50 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between py-3">
           <Link href="/">
             <img
               src="/logo.png"
               alt="SeemaIQ Logo"
-              className="w-35 h-20 pt-3 rounded-lg object-cover"
+              className="w-28 h-12 sm:w-35 sm:h-20 pt-1 sm:pt-3 rounded-lg object-cover"
             />
           </Link>
           <div className="flex items-center gap-4">
@@ -133,22 +133,22 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 py-12">
+      <div className="max-w-7xl mx-auto px-4 py-8 sm:py-12">
         <div className="space-y-8">
 
           {/* Dynamic Greeting */}
-          <div className="space-y-4">
-            <h1 className="text-4xl font-bold">
+          <div className="space-y-3">
+            <h1 className="text-2xl sm:text-4xl font-bold">
               {getGreeting()},{" "}
-              <span className="text-5xl font-extrabold text-blue-200">
+              <span className="text-2xl sm:text-5xl font-extrabold text-blue-200 block sm:inline">
                 {user?.name?.split(" ")[0]}
               </span>
             </h1>
-            <p className="text-muted-foreground text-lg">Ready to practice your interview skills?</p>
+            <p className="text-muted-foreground text-sm sm:text-lg">Ready to practice your interview skills?</p>
           </div>
 
           {/* Start Interview Section */}
-          <Card className="p-8 bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/30">
+          <Card className="p-6 sm:p-8 bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/30">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold mb-2">Start a New Interview</h2>
@@ -161,13 +161,13 @@ export default function DashboardPage() {
           </Card>
 
           {/* Stats */}
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
             {[
               { label: "Total Interviews", value: stats?.totalInterviews || "0" },
               { label: "Average Score", value: (stats?.averageScore || 0) + "%" },
               { label: "Current Streak", value: (stats?.currentStreak || 0) + " days" },
             ].map((stat, i) => (
-              <Card key={i} className="p-6 border border-border">
+              <Card key={i} className="p-4 sm:p-6 border border-border">
                 <p className="text-muted-foreground text-sm mb-2">{stat.label}</p>
                 <p className="text-3xl font-bold">{stat.value}</p>
               </Card>
@@ -182,49 +182,55 @@ export default function DashboardPage() {
               <div className="grid gap-4">
                 {stats.recentInterviews.map((attempt) => (
                   <Link
-                    key={attempt.id} href={`/interview/results?sessionId=${attempt.sessionId || attempt.id} `}>
+                    key={attempt.id}
+                    href={`/interview/results?sessionId=${attempt.sessionId || attempt.id}`}
+                    className="block"
+                  >
                     <Card
-                      className="p-5 border border-border hover:border-primary/40 hover:shadow-md transition-all cursor-pointer rounded-xl bg-card"
+                      className="p-4 sm:p-5 border border-border hover:border-primary/40 hover:shadow-md transition-all cursor-pointer rounded-xl bg-card"
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
 
-                        {/* Left */}
-                        <p className="text-lg font-semibold">
-                          {(() => {
-                            switch (attempt.role.toLowerCase()) {
-                              case "hr":
-                                return "Mira Sharma - HR"
-                              case "expert":
-                                return "Ashish Yadev - Domain Expert"
-                              case "manager":
-                                return "Ryan Bhardwaj - MANAGER"
-                              default:
-                                return attempt.role
-                            }
-                          })()}
-                        </p>
-                        <span className="ml-3 px-3 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
-                          {attempt.role.split("->").length} Round{attempt.role.split("->").length > 1 ? "s" : ""}
-                        </span>
-                        <p className="text-sm font-medium text-foreground/80">
-                          {new Date(attempt.date).toLocaleDateString("en-IN", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(attempt.date).toLocaleTimeString("en-IN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: true,
-                          })}
-                        </p>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-base sm:text-lg font-semibold truncate">
+                              {(() => {
+                                switch (attempt.role.toLowerCase()) {
+                                  case "hr":
+                                    return "Mira Sharma - HR"
+                                  case "expert":
+                                    return "Ashish Yadev - Domain Expert"
+                                  case "manager":
+                                    return "Ryan Bhardwaj - MANAGER"
+                                  default:
+                                    return attempt.role
+                                }
+                              })()}
+                            </p>
+                            <div className="mt-2 sm:mt-0 flex items-center gap-2 flex-wrap">
+                              <span className="px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded-full">
+                                {attempt.role.split("->").length} Round{attempt.role.split("->").length > 1 ? "s" : ""}
+                              </span>
+                              <p className="text-sm font-medium text-foreground/80">
+                                {new Date(attempt.date).toLocaleDateString("en-IN", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(attempt.date).toLocaleTimeString("en-IN", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
 
-
-                        {/* Right */}
                         <div className="flex items-center gap-4">
-                          <p className="text-3xl font-bold text-accent">{attempt.score}%</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-accent">{attempt.score}%</p>
                         </div>
 
                       </div>
@@ -237,7 +243,7 @@ export default function DashboardPage() {
 
           {/* No Attempts */}
           {!stats?.recentInterviews || stats.recentInterviews.length === 0 ? (
-            <Card className="p-8 border border-border text-center">
+            <Card className="p-6 sm:p-8 border border-border text-center">
               <p className="text-muted-foreground mb-4">
                 No interviews yet. Start your first practice session!
               </p>

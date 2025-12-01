@@ -61,6 +61,7 @@
     "mammoth": "^1.6.6",
     "mongodb": "latest",
     "mongodb-client-encryption": "latest",
+    "google-auth-library": "^8.9.0",
     "next": "16.0.3",
     "next-themes": "^0.4.6",
     "nodemailer": "latest",

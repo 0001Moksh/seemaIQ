@@ -170,19 +170,19 @@ export default function ResultsPage() {
     <main className="min-h-screen liquid-bg text-foreground">
       {/* Header */}
       <header className="border-b border-border">
-          <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 flex items-center justify-between py-3">
             <Link href="/">
           <img
               src="/logo.png"
               alt="SeemaIQ Logo"
-              className="w-35 h-20 pt-3 rounded-lg object-cover"
+              className="w-28 h-12 sm:w-35 sm:h-20 pt-1 sm:pt-3 rounded-lg object-cover"
             />
             </Link>
         </div>
       </header>
 
       {/* Results */}
-      <div ref={printRef} className="max-w-6xl mx-auto px-4 py-6">
+      <div ref={printRef} className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
         <div className="space-y-8">
           {/* Navigation & Download */}
           <div className="max-w-8xl mx-auto flex items-center justify-between">
@@ -199,7 +199,7 @@ export default function ResultsPage() {
             </Button>
           </div>
           <div className="text-center space-y-4">
-            <h1 className="text-4xl font-bold">Interview Complete!</h1>
+            <h1 className="text-2xl sm:text-4xl font-bold">Interview Complete!</h1>
             <p className="text-muted-foreground">
               {result.role.charAt(0).toUpperCase() + result.role.slice(1)} Round -{" "}
               {result.experience.charAt(0).toUpperCase() + result.experience.slice(1)} Level
@@ -207,13 +207,13 @@ export default function ResultsPage() {
 
             <div className="inline-block mt-8">
               <div
-                className={`w-48 h-48 bg-gradient-to-br ${getScoreBgColor(
+                className={`w-36 sm:w-48 h-36 sm:h-48 bg-gradient-to-br ${getScoreBgColor(
                   result.finalScore,
                 )} rounded-full flex items-center justify-center border-2 border-primary/30`}
               >
                 <div className="text-center">
-                  <div className={`text-6xl font-bold ${getScoreColor(result.finalScore)}`}>{result.finalScore}</div>
-                  <div className="text-lg text-primary-foreground">out of 100</div>
+                  <div className={`text-4xl sm:text-6xl font-bold ${getScoreColor(result.finalScore)}`}>{result.finalScore}</div>
+                  <div className="text-sm sm:text-lg text-primary-foreground">out of 100</div>
                 </div>
               </div>
             </div>
@@ -228,11 +228,11 @@ export default function ResultsPage() {
           </div>
 
           {/* Round Scores & Transcripts */}
-          <Card className="p-8 border border-border">
+          <Card className="p-6 sm:p-8 border border-border">
             <h2 className="text-2xl font-bold mb-6">Round-wise Performance & Feedback</h2>
             <div className="space-y-8">
               {result.roundScores.map((round) => (
-                <div key={round.round} className="border border-border/50 rounded-lg p-6 space-y-4">
+                <div key={round.round} className="border border-border/50 rounded-lg p-4 sm:p-6 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="font-semibold text-lg">Round {round.round} • {round.round === 1 ? "HR" : round.round === 2 ? "Technical" : "Manager"}</span>
@@ -253,7 +253,7 @@ export default function ResultsPage() {
             </div>
           </Card>
 
-          <Card className="p-8 border border-border">
+          <Card className="p-6 sm:p-8 border border-border">
             <h2 className="text-2xl font-bold mb-6">Detailed Metrics</h2>
             <div className="space-y-6">
               {result.metrics.map((metric) => (
@@ -273,7 +273,7 @@ export default function ResultsPage() {
             </div>
           </Card>
 
-          <Card className="p-8 border border-border">
+          <Card className="p-6 sm:p-8 border border-border">
             <h2 className="text-2xl font-bold mb-6">Areas for Improvement</h2>
             <ul className="space-y-3">
               {result.improvements.map((improvement, i) => (
@@ -289,9 +289,9 @@ export default function ResultsPage() {
 
           {/* Video Playback */}
           {result.answers && result.answers.some((a) => a.videoUrl) && (
-            <Card className="p-8 border border-border">
+            <Card className="p-6 sm:p-8 border border-border">
               <h2 className="text-2xl font-bold mb-6">Your Recorded Answers</h2>
-              <div className="grid md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                 {result.answers
                   .filter((answer) => answer.videoUrl)
                   .map((answer, idx) => (

@@ -324,27 +324,27 @@ export default function InterviewSetupPage() {
     <main className="min-h-screen liquid-bg text-foreground">
       {/* Header */}
       <header className="border-b border-border top-0 z-50 bg-secondary/50 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between py-3">
           <Link href="/">
-            <img src="/logo.png" alt="SeemaIQ Logo" className="w-35 h-20 pt-3 rounded-lg object-cover" />
+            <img src="/logo.png" alt="SeemaIQ Logo" className="w-28 h-12 sm:w-35 sm:h-20 pt-1 sm:pt-3 rounded-lg object-cover" />
           </Link>
         </div>
       </header>
 
       {/* Setup Form */}
-      <div className="max-w-6xl mx-auto px-4 py-12">
-        <div className="space-y-8">
+      <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12">
+        <div className="space-y-6 sm:space-y-8">
           <div className="text-center space-y-2">
-            <h1 className="text-6xl font-bold">Configure Your Interview</h1>
+            <h1 className="text-2xl sm:text-6xl font-bold">Configure Your Interview</h1>
             <p className="text-muted-foreground">Round 1: HR → Round 2: Expert → Round 3: Manager</p>
           </div>
 
-          <Card className="p-8 border border-border space-y-8">
+          <Card className="p-6 sm:p-8 border border-border space-y-8">
            {/* Interview Workflow (Read-only Info) */}
             <div className="space-y-4">
               <h2 className="text-2xl pt-6 font-semibold text-center">Interview Workflow</h2>  
               <hr />          
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {[
                   { round: 1, title: "HR Round", desc: "Communication & Soft Skills" },
                   { round: 2, title: "Technical Round", desc: "Problem Solving & Knowledge" },
@@ -366,7 +366,7 @@ export default function InterviewSetupPage() {
             <div className="space-y-4">
               <h2 className="text-2xl pt-6 font-semibold text-center">Your Experience Level</h2>
               <hr />
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {[
                   { id: "junior", title: "Junior (0-2 years)" },
                   { id: "mid", title: "Mid-Level (2-5 years)" },
