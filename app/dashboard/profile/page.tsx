@@ -409,7 +409,7 @@ export default function ProfilePage() {
                 <header className="border-b border-border top-0 z-50 bg-secondary/50 backdrop-blur">
                     <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
                         <Link href="/">
-                            <img src="/logo.png" alt="SeemaIQ Logo" className="w-35 h-20 pt-3 rounded-lg object-cover" />
+                            <img src="/logo.png" alt="SeemaIQ Logo" className="w-35 h-20 rounded-lg object-cover" />
                         </Link>
                         <Button className="hover:text-red-600 hover:bg-black scale-105 transition-all" variant="ghost" size="sm" onClick={() => { logout(); router.push("/") }}>
                             <LogOut className="w-4 h-4 mr-2" /> Logout

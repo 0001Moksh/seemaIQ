@@ -79,12 +79,50 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
 }
 
 async function extractResumeData(text: string): Promise<ResumeData> {
-  // Use Gemini to extract structured data from resume text
-  const { GoogleGenerativeAI } = await import("@google/generative-ai")
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "")
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+  // If no API key is configured, or if Gemini fails, fall back to a lightweight local extractor.
+  const fallbackExtract = (input: string): ResumeData => {
+    // Basic regex-based extraction for common contact fields
+    const emailMatch = input.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+    const phoneMatch = input.match(/\+?\d[\d ()-]{6,}\d/)
+    // Heuristic for name: first non-empty line with letters and spaces, up to 4 words
+    const lines = input.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    let name = "Not provided"
+    if (lines.length > 0) {
+      const candidate = lines[0]
+      if (candidate.split(" ").length <= 4 && /[A-Za-z]/.test(candidate)) {
+        name = candidate
+      }
+    }
 
-  const prompt = `Extract structured information from this resume text and return as JSON.
+    return {
+      name,
+      email: emailMatch ? emailMatch[0] : "Not provided",
+      phone: phoneMatch ? phoneMatch[0] : "Not provided",
+      linkedin: "",
+      github: "",
+      portfolio: "",
+      location: "",
+      summary: lines.slice(0, 3).join(' '),
+      skills: [],
+      experience: [],
+      education: [],
+      projects: [],
+      certifications: [],
+    }
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    console.warn("GEMINI_API_KEY not set — using local resume fallback extractor")
+    return fallbackExtract(text)
+  }
+
+  try {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai")
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+
+    const prompt = `Extract structured information from this resume text and return as JSON.
 Extract the following fields:
 - name: Full name
 - email: Email address
@@ -105,13 +143,13 @@ ${text}
 
 Return ONLY valid JSON, no markdown or extra text.`
 
-  const result = await model.generateContent(prompt)
-  const responseText = result.response.text()
+    const result = await model.generateContent(prompt)
+    const responseText = result.response.text()
 
-  try {
     const jsonMatch = responseText.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      throw new Error("No JSON found in response")
+      console.warn("Gemini returned no JSON — falling back to local extractor")
+      return fallbackExtract(text)
     }
 
     const resumeData = JSON.parse(jsonMatch[0]) as ResumeData
@@ -133,22 +171,7 @@ Return ONLY valid JSON, no markdown or extra text.`
       certifications: resumeData.certifications || [],
     }
   } catch (error) {
-    console.error("Error parsing resume JSON:", error)
-    // Return empty structure if parsing fails
-    return {
-      name: "Not provided",
-      email: "Not provided",
-      phone: "Not provided",
-      linkedin: "",
-      github: "",
-      portfolio: "",
-      location: "",
-      summary: "Could not parse resume",
-      skills: [],
-      experience: [],
-      education: [],
-      projects: [],
-      certifications: [],
-    }
+    console.error("Gemini resume extraction failed — using fallback. Error:", error)
+    return fallbackExtract(text)
   }
 }
