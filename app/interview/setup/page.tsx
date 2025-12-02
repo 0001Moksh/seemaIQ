@@ -444,36 +444,37 @@ export default function InterviewSetupPage() {
               {/* Mobile & Tablet: Beautiful Vertical Flow – Perfectly Aligned with Desktop */}
               <div className="lg:hidden grid grid-cols-1 sm:grid-cols-3 gap-10 max-w-5xl mx-auto px-4">
                 {rounds.map((r, index) => (
-                  <div><div key={r.round} className={`liquid-bg relative pt-12 pb-10 px-8 rounded-3xl shadow-xl border-2 border-white transform transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:border-primary/30${r.delay}`}
-                    style={{
-                      backgroundImage: `linear-gradient(135deg, ${r.color.split(" ")[1]}08, transparent 70%)`,
-                    }}
-                  >
-                    {/* Gorgeous Round Number Badge – Top Left (Clean & Modern) */}
-                    <div className={`absolute -top-6 -left-6 w-16 h-16 rounded-full 
+                  <div className="#">
+                    <div key={r.round} className={`liquid-bg relative pt-12 pb-10 px-8 rounded-3xl shadow-xl border-2 border-white transform transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:border-primary/30${r.delay}`}
+                      style={{
+                        backgroundImage: `linear-gradient(135deg, ${r.color.split(" ")[1]}08, transparent 70%)`,
+                      }}
+                    >
+                      {/* Gorgeous Round Number Badge – Top Left (Clean & Modern) */}
+                      <div className={`absolute -top-6 -left-6 w-16 h-16 rounded-full 
         bg-gradient-to-br ${r.color} text-white 
         flex items-center justify-center text-3xl font-bold 
         shadow-2xl ring-2 ring-white z-10`}>
-                      {r.round}
-                    </div>
-
-                    {/* Icon – Clean, Large, Colored (No Background Circle) */}
-                    <div className="flex justify-center mb-6">
-                      <div className={`p-5 rounded-2xl bg-gradient-to-br ${r.color} text-white shadow-lg`}>
-                        {r.icon}
+                        {r.round}
                       </div>
+
+                      {/* Icon – Clean, Large, Colored (No Background Circle) */}
+                      <div className="flex justify-center mb-6">
+                        <div className={`p-5 rounded-2xl bg-gradient-to-br ${r.color} text-white shadow-lg`}>
+                          {r.icon}
+                        </div>
+                      </div>
+
+                      {/* Title & Description */}
+                      <div className="text-center">
+                        <h3 className="text-2xl font-bold text-foreground tracking-tight">{r.title}</h3>
+                        <p className="mt-3 text-muted-foreground text-base leading-relaxed">
+                          {r.desc}
+                        </p>
+                      </div>
+
+
                     </div>
-
-                    {/* Title & Description */}
-                    <div className="text-center">
-                      <h3 className="text-2xl font-bold text-foreground tracking-tight">{r.title}</h3>
-                      <p className="mt-3 text-muted-foreground text-base leading-relaxed">
-                        {r.desc}
-                      </p>
-                    </div>
-
-
-                  </div>
                     {/* Vertical Connector – Only between cards (not after last) */}
                     {index < rounds.length - 1 && (
                       <div className="flex justify-center mt-10">

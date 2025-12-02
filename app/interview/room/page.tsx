@@ -615,7 +615,7 @@ export default function InterviewRoomPage() {
           className="hidden lg:block w-1 cursor-col-resize bg-white/20 rounded my-2 transition-colors"
         />
 
-        {/* Transcript Sidebar - full width on mobile, fixed width on desktop */}
+        {/* Desktop Transcript Sidebar */}
         <aside style={{ width: asideWidth }} className="hidden lg:flex lg:flex-col gap-4">
           <Card className="flex flex-col shadow-lg border bg-card">
             <div className="flex px-10 border-border/80">
@@ -767,6 +767,154 @@ export default function InterviewRoomPage() {
               </div>
             </div>
 
+          </div>
+        </aside>
+
+        {/* Mobile Transcript Sidebar */}
+        <aside
+          style={{ width: "100%" }}
+          className="flex flex-col gap-4 lg:hidden"
+        >
+          <Card className="flex flex-col shadow-lg border bg-card w-full">
+            <div className="flex px-6 py-3 border-b border-border/80">
+              <h3 className="font-bold text-lg text-foreground">Live Transcript</h3>
+            </div>
+
+            {/* Scrollable Transcript */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-6 max-h-[65vh] custom-scrollbar-professional">
+              {transcript.length === 0 ? (
+                <p className="text-center py-6 text-muted-foreground italic">
+                  Questions & Answers will appear here...
+                </p>
+              ) : (
+                transcript.map((item, i) => (
+                  <div
+                    key={i}
+                    className={`flex gap-2 ${item.type === "answer" ? "flex-row-reverse" : ""
+                      } animate-in fade-in-50 duration-300`}
+                  >
+                    {item.type === "question" ? (
+                      <img
+                        src={`/videos/${currentRole}/profile.png`}
+                        alt="Interviewer"
+                        className="w-10 h-10 rounded-full object-cover border-2 border-white/50 shadow-md flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full border-2 border-white/50 bg-gradient-to-br from-green-500 to-green-600 text-white flex items-center justify-center font-bold text-lg shadow-md flex-shrink-0">
+                        {userInitial}
+                      </div>
+                    )}
+
+                    <div
+                      className={`max-w-[75%] px-4 py-3 rounded-2xl shadow-sm ${item.type === "question"
+                          ? "bg-primary/15 text-foreground"
+                          : "bg-muted text-muted-foreground"
+                        }`}
+                    >
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {item.text || "..."}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={transcriptEndRef} />
+            </div>
+          </Card>
+
+          {/* Mobile Floating Controls */}
+          <div className="fixed inset-0 pointer-events-none z-50">
+
+            {/* Auto Submit Banner */}
+            {isRecording && silenceCountdown !== null && (
+              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
+                <div className="bg-black/80 backdrop-blur-xl border border-white/20 text-white px-4 py-2 rounded-xl shadow-xl">
+                  <p className="text-sm font-medium opacity-90">
+                    Auto-submitting in {silenceCountdown}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Main Floating Buttons */}
+            <div className="absolute bottom-6 right-6 pointer-events-auto">
+              <div className="flex items-center gap-4 bg-white/10 backdrop-blur-2xl border border-white/20 rounded-full p-4 shadow-xl">
+
+                {/* Mic Button */}
+                <Button
+                  size="lg"
+                  variant="ghost"
+                  onClick={questionReady ? startRecording : undefined}
+                  disabled={!questionReady || isRecording}
+                  className={`
+            relative w-12 h-12 rounded-full p-0 transition-all duration-300
+            ${!questionReady
+                      ? "bg-gray-600/40 text-gray-500 cursor-not-allowed"
+                      : isRecording
+                        ? "bg-white-600 text-black hover:bg-red-700 shadow-lg ring-8 ring-red-500/30 animate-pulse"
+                        : "bg-white text-gray-900 hover:scale-105 shadow-xl"
+                    }
+          `}
+                >
+                  {!isRecording && questionReady && (
+                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 pointer-events-none">
+                      <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
+                        Turn On Your Mic
+                      </div>
+                    </div>
+                  )}
+
+                  {isRecording ? (
+                    <span className="text-xl font-bold"></span>
+                  ) : (
+                    <Mic className="w-8 h-8" />
+                  )}
+                </Button>
+
+                {/* End Call */}
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  onClick={() => router.push("/dashboard")}
+                  className="
+            w-12 h-12 rounded-full p-0 
+            bg-gradient-to-br from-red-600 to-red-700 
+            hover:from-red-700 hover:to-red-800 
+            shadow-xl hover:shadow-2xl hover:scale-105 
+            transition-all duration-300 
+            ring-8 ring-red-600/20
+          "
+                >
+                  <Phone className="w-9 h-9 rotate-135" />
+                </Button>
+
+                {/* Next Button in Break */}
+                {phase === "BREAK" && (
+                  <Button
+                    size="lg"
+                    className="
+              font-bold text-xs 
+              bg-gradient-to-r from-indigo-500 to-indigo-600 
+              hover:from-indigo-600 hover:to-indigo-700 
+              shadow-xl hover:shadow-2xl rounded-full px-4 py-2
+              transition-all duration-300
+            "
+                    onClick={() => {
+                      if (currentRole === "hr") startRound("expert");
+                      else if (currentRole === "expert") startRound("manager");
+                      else {
+                        setPhase("COMPLETE");
+                        setTimeout(() => {
+                          router.push(`/interview/results?sessionId=${sessionId}`);
+                        }, 2000);
+                      }
+                    }}
+                  >
+                    {currentRole === "manager" ? "Complete ✓" : "Next →"}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </aside>
       </div>
