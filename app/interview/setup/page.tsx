@@ -2,9 +2,10 @@
 
 import type React from "react"
 import { Briefcase, Code2, Users, Sparkles } from "lucide-react";
-import { Upload, FileText, X, CheckCircle, Code, Database, Palette, Cloud, Globe } from "lucide-react";
+import { FileText, X, CheckCircle, Code, Database, Palette, Cloud, Globe } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox"
-
+import { Upload, User, PenTool } from "lucide-react";
+import { cn } from "@/lib/utils"; // assuming you have a cn() utility
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -371,7 +372,7 @@ export default function InterviewSetupPage() {
       <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12">
         <div className="space-y-6 sm:space-y-8">
           <div className="text-center space-y-2">
-            <h1 className="text-2xl sm:text-6xl font-bold">Configure Your Interview</h1>
+            <h1 className="text-3xl sm:text-6xl font-bold">Configure Your Interview</h1>
           </div>
 
           {/* Interview Workflow (Read-only Info) */}
@@ -385,70 +386,113 @@ export default function InterviewSetupPage() {
                 </p>
               </div>
 
-              {/* Desktop: Horizontal Flow with Arrows */}
-              <div className="hidden lg:flex items-center justify-center gap-4">
+              {/* Desktop: Premium Horizontal Timeline – Now 100% in sync with mobile */}
+              <div className="hidden lg:flex items-center justify-center gap-16 max-w-7xl mx-auto px-8">
                 {rounds.map((r, index) => (
-                  <div key={r.round} className={`flex items-center ${index !== 0 ? "ml-12" : ""}`}>
+                  <div key={r.round} className="flex items-center">
                     {/* Card */}
                     <div
-                      className={`relative p-8 rounded-2xl shadow-xl border  
-                transform transition-all hover:scale-105 hover:shadow-2xl ${r.delay}`}
+                      className={`relative pt-8 pb-8 px-1 w-50 border-l border-r rounded-3xl shadow-xl border-4 border-white/80 liquid-bg
+                   transform transition-all duration-300 hover:scale-[1.3] hover:shadow-2xl hover:border-primary
+                   ${r.delay}`}
                       style={{
-                        backgroundImage: `linear-gradient(13deg, ${r.color.split(" ")[1]}10, transparent)`,
+                        backgroundImage: `linear-gradient(135deg, ${r.color.split(" ")[1]}08, transparent 70%)`,
                       }}
                     >
-                      <div className={`p-4 text-white mb-4 w-fit`}>
-                        {r.icon}
-                      </div>
-                      <div className="text-5xl font-bold text-white/90 absolute -top-6 -right-1">
+                      {/* Beautiful Round Badge – Top Left (same as mobile) */}
+                      <div className={`absolute -top-6 -left-6 w-10 h-10 rounded-full 
+          bg-gradient-to-br ${r.color} text-white 
+          flex items-center justify-center text-xl font-bold 
+          shadow-2xl ring-3 ring-white z-10`}>
                         {r.round}
                       </div>
-                      <h3 className="text-2xl font-bold text-foreground mt-2">{r.title}</h3>
-                      <p className="mt-3 text-muted-foreground">{r.desc}</p>
+
+                      {/* Icon with soft gradient background */}
+                      <div className="flex justify-center mb-6">
+                        <div className={`p-5 rounded-2xl bg-gradient-to-br ${r.color} text-white shadow-lg`}>
+                          {r.icon}
+                        </div>
+                      </div>
+
+                      {/* Text */}
+                      <div className="text-center max-w-xs">
+                        <h3 className="text-lg font-bold text-foreground tracking-tight">{r.title}</h3>
+                        <p className="text-muted-foreground text-base leading-relaxed">
+                          {r.desc}
+                        </p>
+                      </div>
                     </div>
 
-                    {/* Arrow */}
+                    {/* Horizontal Connector + Animated Sparkle */}
                     {index < rounds.length - 1 && (
-                      <div className="mx-8">
-                        <Sparkles className="w-30 h-30 text-primary animate-pulse" />
-                        <div className="w-32 h-2 py-2 bg-gradient-to-r from-primary to-purple-600 rounded-full -mt-5" />
+                      <div className="relative mx-4">
+                        {/* Double sparkle effect */}
+                        <div className="absolute -top-5 -right-20 -translate-x-1/2">
+                          <Sparkles className="w-12 h-12 text-primary animate-ping absolute opacity-75" />
+                          <Sparkles className="w-12 h-12 text-primary relative" />
+                        </div>
+
+                        {/* Thick gradient arrow line */}
+                        <div className="animate-ping scale-[-1] w-32 h-1.5 bg-gradient-to-r from-primary via-purple-500 to-transparent rounded-full" />
                       </div>
                     )}
                   </div>
                 ))}
               </div>
 
-              {/* Mobile & Tablet: Vertical Stacked Cards */}
-              <div className="lg:hidden grid grid-cols-1 sm:grid-cols-3 gap-6">
-                {rounds.map((r) => (
-                  <div
-                    key={r.round}
-                    className={`relative p-6 rounded-2xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 
-              transform transition-all hover:scale-105 ${r.delay}`}
+
+              {/* Mobile & Tablet: Beautiful Vertical Flow – Perfectly Aligned with Desktop */}
+              <div className="lg:hidden grid grid-cols-1 sm:grid-cols-3 gap-10 max-w-5xl mx-auto px-4">
+                {rounds.map((r, index) => (
+                  <div><div key={r.round} className={`liquid-bg relative pt-12 pb-10 px-8 rounded-3xl shadow-xl border-2 border-white transform transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:border-primary/30${r.delay}`}
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${r.color.split(" ")[1]}08, transparent 70%)`,
+                    }}
                   >
-                    <div className={`absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-12 rounded-full 
-                bg-gradient-to-br ${r.color} flex items-center justify-center text-white font-bold text-xl shadow-lg`}
-                    >
+                    {/* Gorgeous Round Number Badge – Top Left (Clean & Modern) */}
+                    <div className={`absolute -top-6 -left-6 w-16 h-16 rounded-full 
+        bg-gradient-to-br ${r.color} text-white 
+        flex items-center justify-center text-3xl font-bold 
+        shadow-2xl ring-2 ring-white z-10`}>
                       {r.round}
                     </div>
 
-                    <div className="pt-6 text-center">
-                      <div className={`inline-flex p-4 rounded-full bg-gradient-to-br ${r.color} text-white mb-4`}>
+                    {/* Icon – Clean, Large, Colored (No Background Circle) */}
+                    <div className="flex justify-center mb-6">
+                      <div className={`p-5 rounded-2xl bg-gradient-to-br ${r.color} text-white shadow-lg`}>
                         {r.icon}
                       </div>
-                      <h3 className="text-xl font-bold text-foreground">{r.title}</h3>
-                      <p className="mt-3 text-sm text-muted-foreground">{r.desc}</p>
                     </div>
 
-                    {/* Vertical connector for mobile */}
-                    {r.round < 3 && (
-                      <div className="flex justify-center mt-4">
-                        <div className="w-1 h-12 bg-gradient-to-b from-primary to-purple-600 rounded-full" />
+                    {/* Title & Description */}
+                    <div className="text-center">
+                      <h3 className="text-2xl font-bold text-foreground tracking-tight">{r.title}</h3>
+                      <p className="mt-3 text-muted-foreground text-base leading-relaxed">
+                        {r.desc}
+                      </p>
+                    </div>
+
+
+                  </div>
+                    {/* Vertical Connector – Only between cards (not after last) */}
+                    {index < rounds.length - 1 && (
+                      <div className="flex justify-center mt-10">
+                        <div className="relative">
+                          {/* Animated Arrow Down */}
+                          <div className="absolute p-3 -bottom-8 left-1/2 -translate-x-1/2">
+                            <Sparkles className="w-10 h-10 text-primary animate-ping absolute" />
+                            <Sparkles className="w-10 h-10 text-primary relative" />
+                          </div>
+
+                          {/* Gradient Connector Line */}
+                          <div className="animate-ping w-1.5 h-24 bg-gradient-to-b from-primary/60 via-purple-500 to-transparent rounded-full" />
+                        </div>
                       </div>
                     )}
                   </div>
                 ))}
               </div>
+
 
               {/* Fun note */}
               <div className="text-center mt-12">
@@ -462,7 +506,7 @@ export default function InterviewSetupPage() {
 
             {/* Experience Level */}
             <div className="space-y-4">
-              <h2 className="text-2xl pt-6 font-semibold text-center">Your Experience Level</h2>
+              <h2 className="text-3xl pt-6 font-semibold text-center">Your Experience Level</h2>
               <hr />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {[
@@ -473,18 +517,19 @@ export default function InterviewSetupPage() {
                   <button
                     key={exp.id}
                     onClick={() => setExperience(exp.id)}
-                    className={`p-4 rounded-lg border-2 transition-all font-medium ${experience === exp.id ? "border-primary bg-primary/10" : "border-border hover:border-accent"
+                    className={`p-4 rounded-lg border-2 transition-all font-medium ${experience === exp.id ? "border-primary bg-primary/10" : "border-border hover:border-accent/50"
                       }`}
                   >
                     {exp.title}
                   </button>
                 ))}
               </div>
+              <hr />
             </div>
 
             <section className="mb-12">
               <h2 className="text-3xl pt-6 font-semibold text-center mb-8">Interview Domain</h2>
-              <hr className="flex-grow p-1 border-primary/50" />
+              <hr className="flex-grow p-1 border-white/50" />
               <div className="space-y-4">
                 <div>
                   <Input
@@ -493,7 +538,7 @@ export default function InterviewSetupPage() {
                     onChange={(e) => setDomain(e.target.value)}
                     className="mb-2"
                   />
-                  <hr className="flex-grow border-primary/50" />
+                  <hr className="flex-grow border-white/50" />
                   <p className="text-xs text-muted-foreground mt-2">Or select from popular domains below:</p>
                 </div>
 
@@ -522,35 +567,79 @@ export default function InterviewSetupPage() {
 
             {/* Resume Upload / Manual Form */}
             <div className="space-y-6">
-              <h2 className="text-2xl font-semibold text-center">
+              <h2 className="text-3xl font-semibold text-center">
                 Resume Submission
               </h2>
+              <hr />
 
               {/* Resume source selector: profile / upload / manual */}
-              <div className="flex items-center justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setResumeSource('profile'); setInterviewWithoutResume(false); }}
-                  className={`px-3 py-2 rounded ${resumeSource === 'profile' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                >
-                  Use Profile
-                </button>
+              <div className="flex items-center justify-center">
+                <div className="relative p-1 liquid-bg 
+                  rounded-2xl shadow-2xl backdrop-blur-xl border border-white/50 
+                  ring-1 ring-primary/20 w-full max-w-3xl">
 
-                <button
-                  type="button"
-                  onClick={() => { setResumeSource('upload'); setInterviewWithoutResume(false); setResumeFile(null); setShowResumeSummary(false); setResumeData(null); }}
-                  className={`px-3 py-2 rounded ${resumeSource === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                >
-                  Upload New Resume
-                </button>
+                  {/* Moving Glow Background (active indicator) */}
+                  <div
+                    className={cn(
+                      "absolute inset-5 rounded-xl transition-all duration-500 ease-out",
+                      "bg-gradient-to-r from-primary via-cyan-100 to-primary",
+                      "shadow-lg blur-xl opacity-90",
+                      resumeSource === 'profile' && "translate-x-0",
+                      resumeSource === 'upload' && "translate-x-full",
+                      resumeSource === 'manual' && "translate-x-[200%]"
+                    )}
+                    style={{ width: "calc(33.333% - 8px)" }}
+                  />
 
-                <button
-                  type="button"
-                  onClick={() => { setResumeSource('manual'); setInterviewWithoutResume(true); setResumeFile(null); setShowResumeSummary(false); setResumeData(null); }}
-                  className={`px-3 py-2 rounded ${resumeSource === 'manual' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                >
-                  Manual Entry
-                </button>
+                  {/* Buttons */}
+                  <div className="relative flex w-full">
+                    {[
+                      { id: 'profile', label: 'Use Profile', icon: User },
+                      { id: 'upload', label: 'Upload Resume', icon: Upload },
+                      { id: 'manual', label: 'Manual Entry', icon: PenTool },
+                    ].map((option, idx) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => {
+                          if (option.id === 'profile') {
+                            setResumeSource('profile');
+                            setInterviewWithoutResume(false);
+                          } else if (option.id === 'upload') {
+                            setResumeSource('upload');
+                            setInterviewWithoutResume(false);
+                            setResumeFile(null);
+                            setShowResumeSummary(false);
+                            setResumeData(null);
+                          } else {
+                            setResumeSource('manual');
+                            setInterviewWithoutResume(true);
+                            setResumeFile(null);
+                            setShowResumeSummary(false);
+                            setResumeData(null);
+                          }
+                        }}
+                        className={cn(
+                          "relative z-10 flex-1 flex items-center justify-center gap-2.5",
+                          "px-4 py-3",                            // bigger tap area + breathing room
+                          "text-xs sm:text-sm font-semibold tracking-wider",
+                          "rounded-2xl",
+                          "min-w-0 w-full",                        // THIS is the key: allow it to grow
+                          "whitespace-nowrap overflow-hidden text-ellipsis",  // still cuts off super long text cleanly
+                          "transition-all duration-300",
+
+                          resumeSource === option.id
+                            ? "text-white shadow-xl ring-4 ring-primary"
+                            : "text-gray-300 hover:text-white hover:bg-white/10 active:bg-white/20"
+                        )}
+                      >
+                        <option.icon className="w-5 h-5" />
+                        <span className="hidden sm:inline">{option.label}</span>
+                        <span className="sm:hidden">{option.label.split(' ')[0]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               {/* Upload box only when resumeSource === 'upload' */}
               {resumeSource === 'upload' && (
@@ -999,7 +1088,7 @@ export default function InterviewSetupPage() {
             {/* Start Button */}
             <div className="flex gap-4 pt-4">
               <Link href="/dashboard" className="flex-1">
-                <Button variant="outline" className="w-full">
+                <Button className="border bg-black/20 w-full">
                   Cancel
                 </Button>
               </Link>
