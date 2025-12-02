@@ -692,9 +692,8 @@ export default function InterviewRoomPage() {
                         ? "bg-white-600 text-black hover:bg-red-700 shadow-2xl ring-8 ring-red-500/30 animate-pulse"
                         : "bg-white text-gray-900 hover:scale-105 shadow-xl"
                     }
-        `}
+                    `}
                 >
-
                   {/* Tooltip – Only when ready & not recording */}
                   {!isRecording && questionReady && (
                     <div className="absolute -top-16 -translate-x-1/2 pointer-events-none">
@@ -807,8 +806,8 @@ export default function InterviewRoomPage() {
 
                     <div
                       className={`max-w-[75%] px-4 py-3 rounded-2xl shadow-sm ${item.type === "question"
-                          ? "bg-primary/15 text-foreground"
-                          : "bg-muted text-muted-foreground"
+                        ? "bg-primary/15 text-foreground"
+                        : "bg-muted text-muted-foreground"
                         }`}
                     >
                       <p className="text-sm leading-relaxed whitespace-pre-wrap">
