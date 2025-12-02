@@ -20,7 +20,7 @@ import { Undo2 } from "lucide-react"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 
-function calculateCompletion(profile: Partial<ResumeData> & { name?: string; email?: string }) {
+function calculateCompletion(profile: Partial<ProfileData> & { name?: string; email?: string }) {
     const fields = [
         profile.name,
         profile.email,
@@ -28,6 +28,7 @@ function calculateCompletion(profile: Partial<ResumeData> & { name?: string; ema
         profile.summary,
         profile.skills && profile.skills.length > 0,
         profile.experience && profile.experience.length > 0,
+        profile.domain,
     ]
     return Math.round((fields.filter(Boolean).length / fields.length) * 100)
 }
@@ -50,7 +51,8 @@ export default function ProfilePage() {
     // Track changes
     const hasChanges = JSON.stringify(profile) !== JSON.stringify(initialProfile)
     const completion = calculateCompletion(profile)
-    const canDownload = completion >= 80
+    const hasRequiredFields = !!(profile.name && profile.email)
+    const canDownload = completion >= 80 && hasRequiredFields
 
     useEffect(() => {
         if (!isLoading && !isLoggedIn) router.push("/auth/login")
@@ -60,15 +62,17 @@ export default function ProfilePage() {
             setInitialProfile(p => ({ ...p, name: user.name || p.name, email: user.email || p.email }))
         }
 
-        const saved = localStorage.getItem("seemaiq_profile")
-        if (saved) {
-            try {
+        // Load per-user saved profile from localStorage to avoid cross-user leakage.
+        try {
+            const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
+            const saved = localStorage.getItem(key)
+            if (saved) {
                 const parsed = JSON.parse(saved)
                 setProfile(prev => ({ ...prev, ...parsed }))
                 setInitialProfile(prev => ({ ...prev, ...parsed }))
-            } catch (e) {
-                console.error("Failed to load saved profile")
             }
+        } catch (e) {
+            console.error("Failed to load saved profile", e)
         }
     }, [user, isLoading, isLoggedIn, router])
 
@@ -92,8 +96,18 @@ export default function ProfilePage() {
     }
 
     const saveProfile = () => {
+        if (!profile.name || !profile.email) {
+            toast({
+                title: "Missing required fields",
+                description: "Name and email are required before saving.",
+                variant: "destructive",
+            })
+            return
+        }
+
         try {
-            localStorage.setItem("seemaiq_profile", JSON.stringify(profile))
+            const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
+            localStorage.setItem(key, JSON.stringify(profile))
             setInitialProfile({ ...profile }) // Mark as saved
             toast({
                 title: "Saved!",
@@ -136,6 +150,13 @@ export default function ProfilePage() {
             if ((data as any).domain) updated.domain = (data as any).domain
             setProfile(updated)
             setInitialProfile(updated) // Auto-save after successful parse
+            // Persist parsed resume to the user-specific localStorage key immediately to avoid cross-user leaks
+            try {
+                const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
+                localStorage.setItem(key, JSON.stringify(updated))
+            } catch (e) {
+                console.warn("Failed to auto-save parsed resume to localStorage", e)
+            }
             toast({
                 title: "Resume Parsed!",
                 description: `${file.name} loaded successfully.`,
@@ -188,6 +209,11 @@ export default function ProfilePage() {
     }
 
     const downloadResume = async () => {
+        if (!profile.name || !profile.email) {
+            toast({ title: "Missing required fields", description: "Please provide your name and email before downloading.", variant: "destructive" })
+            return
+        }
+
         try {
             const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -505,8 +531,8 @@ export default function ProfilePage() {
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-5">
-                                    <div><Label>Full Name</Label><Input value={profile.name || ""} onChange={e => updateField("name", e.target.value)} placeholder="John Doe" /></div>
-                                    <div><Label>Email</Label><Input type="email" value={profile.email || ""} onChange={e => updateField("email", e.target.value)} /></div>
+                                    <div><Label>Full Name <span className="text-destructive">*</span></Label><Input value={profile.name || ""} onChange={e => updateField("name", e.target.value)} placeholder="John Doe" /></div>
+                                    <div><Label>Email <span className="text-destructive">*</span></Label><Input type="email" value={profile.email || ""} onChange={e => updateField("email", e.target.value)} /></div>
                                     <div><Label>Phone</Label><Input value={profile.phone || ""} onChange={e => updateField("phone", e.target.value)} placeholder="+91 98765 43210" /></div>
                                     <div><Label>Domain</Label><Input value={profile.domain || ""} onChange={e => updateField("domain", e.target.value)} placeholder="e.g. Frontend, Data Science" /></div>
                                     <div><Label>Address</Label><Input value={profile.location || ""} onChange={e => updateField("location", e.target.value)} placeholder="e.g. 123 Main St, City, Country" /></div>
@@ -627,8 +653,8 @@ export default function ProfilePage() {
                                 <Button
                                     size="lg"
                                     onClick={saveProfile}
-                                    disabled={!hasChanges}
-                                    className={hasChanges ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg" : "opacity-60"}
+                                    disabled={!hasChanges || !hasRequiredFields}
+                                    className={hasChanges && hasRequiredFields ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg" : "opacity-60 cursor-not-allowed"}
                                 >
                                     {hasChanges ? (
                                         <>

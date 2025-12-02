@@ -18,12 +18,8 @@ export const metadata: Metadata = {
   title: "SeemaIQ – AI Interview Simulator",
   description: "Master your interview skills with AI-powered practice sessions.",
   icons: {
-    icon: [
-      { url: "/icon-light-32x32.png", media: "(prefers-color-scheme: light)" },
-      { url: "/icon-dark-32x32.png", media: "(prefers-color-scheme: dark)" },
-      { url: "/icon.svg", type: "image/svg+xml" },
-    ],
-    apple: "/apple-icon.png",
+    icon: "/logo_icon.png",
+    apple: "/logo_icon.png",
   },
 }
 
@@ -43,7 +39,6 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${geist.variable} ${geistMono.variable}`}
     >
-      {/* supports light/dark system theme */}
       <body className="font-sans antialiased min-h-screen liquid-bg text-foreground">
         <main className="min-h-screen">{children}</main>
         <Analytics />

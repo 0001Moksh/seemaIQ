@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-import { Upload, FileText, X, CheckCircle, Code, Database, Briefcase, Palette, Cloud, Globe } from "lucide-react";
+import { Briefcase, Code2, Users, Sparkles } from "lucide-react";
+import { Upload, FileText, X, CheckCircle, Code, Database, Palette, Cloud, Globe } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox"
 
 import { useState, useEffect } from "react"
@@ -31,7 +32,7 @@ interface ResumeData {
 
 export default function InterviewSetupPage() {
   const router = useRouter()
-  const { isLoggedIn, isLoading } = useAuth()
+  const { user, isLoggedIn, isLoading } = useAuth()
   const [experience, setExperience] = useState("mid")
   const [domain, setDomain] = useState<string>("")
   const domains = [
@@ -104,16 +105,24 @@ export default function InterviewSetupPage() {
   useEffect(() => {
     if (resumeSource !== 'profile') return
     try {
-      const saved = localStorage.getItem('seemaiq_profile')
+      const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : 'seemaiq_profile_guest'
+      const saved = localStorage.getItem(key)
       if (!saved) return
       const parsed = JSON.parse(saved)
+      // Normalize experience objects so UI uses `title` consistently.
+      const normalizedExperience = (parsed.experience || []).map((e: any) => ({
+        company: e.company || e.employer || "",
+        title: e.title || e.position || "",
+        duration: e.duration || e.years || "",
+      }))
+
       const mapped: ResumeData = {
         name: parsed.name || '',
         email: parsed.email || '',
         phone: parsed.phone || '',
         summary: parsed.summary || '',
         skills: parsed.skills || [],
-        experience: parsed.experience || [],
+        experience: normalizedExperience,
         education: parsed.education || [],
         projects: parsed.projects || [],
         certifications: parsed.certifications || [],
@@ -130,9 +139,9 @@ export default function InterviewSetupPage() {
       setShowResumeSummary(true)
       setInterviewWithoutResume(false)
     } catch (e) {
-      // ignore
+      console.error('Failed to load saved profile for user', e)
     }
-  }, [resumeSource])
+  }, [resumeSource, user, domain])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -238,9 +247,9 @@ export default function InterviewSetupPage() {
       let finalResumeData: ResumeData | null = null
       if (resumeSource === 'manual' || interviewWithoutResume) {
         finalResumeData = {
-          name: noResumeName,
-          email: noResumeEmail,
-          phone: noResumePhone || "",
+          name: "",
+          email: "",
+          phone: "",
           summary: "",
           skills: noResumeSkills,
           experience: noResumeExperience,
@@ -318,7 +327,34 @@ export default function InterviewSetupPage() {
     }
 
     return false
-  })()
+  })();
+
+  const rounds = [
+    {
+      round: 1,
+      title: "HR Round",
+      icon: <Users className="w-8 h-8" />,
+      desc: "Communication, Cultural Fit & Soft Skills",
+      color: "from-blue-500 to-cyan-500",
+      delay: "animate-in fade-in slide-in-from-left-20 duration-700",
+    },
+    {
+      round: 2,
+      title: "Technical Round",
+      icon: <Code2 className="w-8 h-8" />,
+      desc: "Problem Solving, Coding & Technical Knowledge",
+      color: "from-purple-500 to-pink-500",
+      delay: "animate-in fade-in slide-in-from-bottom-20 duration-700 delay-200",
+    },
+    {
+      round: 3,
+      title: "Manager Round",
+      icon: <Briefcase className="w-8 h-8" />,
+      desc: "Leadership, Experience & Team Fit",
+      color: "from-orange-500 to-red-500",
+      delay: "animate-in fade-in slide-in-from-right-20 duration-700 delay-400",
+    },
+  ];
 
   return (
     <main className="min-h-screen liquid-bg text-foreground">
@@ -336,31 +372,93 @@ export default function InterviewSetupPage() {
         <div className="space-y-6 sm:space-y-8">
           <div className="text-center space-y-2">
             <h1 className="text-2xl sm:text-6xl font-bold">Configure Your Interview</h1>
-            <p className="text-muted-foreground">Round 1: HR → Round 2: Expert → Round 3: Manager</p>
           </div>
 
-          <Card className="p-6 sm:p-8 border border-border space-y-8">
-           {/* Interview Workflow (Read-only Info) */}
-            <div className="space-y-4">
-              <h2 className="text-2xl pt-6 font-semibold text-center">Interview Workflow</h2>  
-              <hr />          
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                  { round: 1, title: "HR Round", desc: "Communication & Soft Skills" },
-                  { round: 2, title: "Technical Round", desc: "Problem Solving & Knowledge" },
-                  { round: 3, title: "Manager Round", desc: "Leadership & Experience" },
-                ].map((r) => (
-                  <div
-                    key={r.round}
-                    className="p-4 rounded-lg border-2 border-primary/30 bg-primary/5 text-center"
-                  >
-                    <p className="text-xs text-muted-foreground">Round {r.round}</p>
-                    <p className="font-semibold text-lg">{r.title}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{r.desc}</p>
+          {/* Interview Workflow (Read-only Info) */}
+          <section className="px-4 sm:px-6 lg:px-8 rounded-2xl">
+            <div className="max-w-7xl mx-auto">
+              {/* Heading */}
+              <div className="text-center mb-12">
+
+                <p className=" text-lg text-muted-foreground max-w-2xl mx-auto">
+                  Just <span className="font-semibold text-primary">3 simple rounds</span> to know each other better and see if we’re a great match!
+                </p>
+              </div>
+
+              {/* Desktop: Horizontal Flow with Arrows */}
+              <div className="hidden lg:flex items-center justify-center gap-4">
+                {rounds.map((r, index) => (
+                  <div key={r.round} className={`flex items-center ${index !== 0 ? "ml-12" : ""}`}>
+                    {/* Card */}
+                    <div
+                      className={`relative p-8 rounded-2xl shadow-xl border  
+                transform transition-all hover:scale-105 hover:shadow-2xl ${r.delay}`}
+                      style={{
+                        backgroundImage: `linear-gradient(13deg, ${r.color.split(" ")[1]}10, transparent)`,
+                      }}
+                    >
+                      <div className={`p-4 text-white mb-4 w-fit`}>
+                        {r.icon}
+                      </div>
+                      <div className="text-5xl font-bold text-white/90 absolute -top-6 -right-1">
+                        {r.round}
+                      </div>
+                      <h3 className="text-2xl font-bold text-foreground mt-2">{r.title}</h3>
+                      <p className="mt-3 text-muted-foreground">{r.desc}</p>
+                    </div>
+
+                    {/* Arrow */}
+                    {index < rounds.length - 1 && (
+                      <div className="mx-8">
+                        <Sparkles className="w-30 h-30 text-primary animate-pulse" />
+                        <div className="w-32 h-2 py-2 bg-gradient-to-r from-primary to-purple-600 rounded-full -mt-5" />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
+
+              {/* Mobile & Tablet: Vertical Stacked Cards */}
+              <div className="lg:hidden grid grid-cols-1 sm:grid-cols-3 gap-6">
+                {rounds.map((r) => (
+                  <div
+                    key={r.round}
+                    className={`relative p-6 rounded-2xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 
+              transform transition-all hover:scale-105 ${r.delay}`}
+                  >
+                    <div className={`absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-12 rounded-full 
+                bg-gradient-to-br ${r.color} flex items-center justify-center text-white font-bold text-xl shadow-lg`}
+                    >
+                      {r.round}
+                    </div>
+
+                    <div className="pt-6 text-center">
+                      <div className={`inline-flex p-4 rounded-full bg-gradient-to-br ${r.color} text-white mb-4`}>
+                        {r.icon}
+                      </div>
+                      <h3 className="text-xl font-bold text-foreground">{r.title}</h3>
+                      <p className="mt-3 text-sm text-muted-foreground">{r.desc}</p>
+                    </div>
+
+                    {/* Vertical connector for mobile */}
+                    {r.round < 3 && (
+                      <div className="flex justify-center mt-4">
+                        <div className="w-1 h-12 bg-gradient-to-b from-primary to-purple-600 rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Fun note */}
+              <div className="text-center mt-12">
+                <p className="text-lg italic text-muted-foreground">
+                  <span className="text-primary font-semibold">Relax & Be Yourself</span> — We’re excited to meet you! 🚀
+                </p>
+              </div>
             </div>
+          </section>
+          <Card className="p-6 sm:p-8 border border-border space-y-8">
 
             {/* Experience Level */}
             <div className="space-y-4">
@@ -386,7 +484,7 @@ export default function InterviewSetupPage() {
 
             <section className="mb-12">
               <h2 className="text-3xl pt-6 font-semibold text-center mb-8">Interview Domain</h2>
-                    <hr className="flex-grow p-1 border-primary/50" />
+              <hr className="flex-grow p-1 border-primary/50" />
               <div className="space-y-4">
                 <div>
                   <Input
@@ -395,8 +493,8 @@ export default function InterviewSetupPage() {
                     onChange={(e) => setDomain(e.target.value)}
                     className="mb-2"
                   />
-                    <hr className="flex-grow border-primary/50" />
-                    <p className="text-xs text-muted-foreground mt-2">Or select from popular domains below:</p> 
+                  <hr className="flex-grow border-primary/50" />
+                  <p className="text-xs text-muted-foreground mt-2">Or select from popular domains below:</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -405,8 +503,8 @@ export default function InterviewSetupPage() {
                       key={d.id}
                       onClick={() => setDomain(d.label)}
                       className={`p-4 rounded-xl border transition-all text-left flex items-start gap-4 ${domain === d.label
-                          ? "border-primary bg-primary/5 shadow-lg ring-2 ring-primary/20"
-                          : "border-border hover:border-primary/40 hover:shadow-md"
+                        ? "border-primary bg-primary/5 shadow-lg ring-2 ring-primary/20"
+                        : "border-border hover:border-primary/40 hover:shadow-md"
                         }`}
                     >
                       <div className={`p-2 rounded-md ${domain === d.label ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
@@ -453,41 +551,41 @@ export default function InterviewSetupPage() {
                 >
                   Manual Entry
                 </button>
-              </div>          
+              </div>
               {/* Upload box only when resumeSource === 'upload' */}
               {resumeSource === 'upload' && (
                 <div>
-                <div
-                  className={`border-2 border-dashed rounded-xl p-10 transition-all cursor-pointer bg-secondary/30
+                  <div
+                    className={`border-2 border-dashed rounded-xl p-10 transition-all cursor-pointer bg-secondary/30
       ${resumeFile ? "border-primary/60" : "border-border hover:border-primary/40"}`}
-                  onClick={() => document.getElementById("resume-upload")?.click()}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                >
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    onChange={handleFileChange}
-                    className="hidden"
-                    id="resume-upload"
-                  />
-                  <div className="flex flex-col items-center justify-center gap-3">
-                    <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                      <svg
-                        className="w-7 h-7 text-primary animate-pulse"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M12 4v16m8-8H4" />
-                      </svg>
-                    </div>
+                    onClick={() => document.getElementById("resume-upload")?.click()}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                  >
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      id="resume-upload"
+                    />
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                        <svg
+                          className="w-7 h-7 text-primary animate-pulse"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M12 4v16m8-8H4" />
+                        </svg>
+                      </div>
 
-                    <p className="text-sm md:text-lg font-semibold">{resumeFile ? resumeFile.name : "Choose file or drag it here"}</p>
-                    <p className="text-xs text-muted-foreground">PDF, DOC or DOCX</p>
+                      <p className="text-sm md:text-lg font-semibold">{resumeFile ? resumeFile.name : "Choose file or drag it here"}</p>
+                      <p className="text-xs text-muted-foreground">PDF, DOC or DOCX</p>
+                    </div>
                   </div>
-                </div>
                 </div>
               )}
 
@@ -502,7 +600,7 @@ export default function InterviewSetupPage() {
                     </div>
                     <Input
                       placeholder="eg: Akshat Rai"
-                      value={noResumeName || "Moksh"}
+                      value={noResumeName || ""}
                       onChange={(e) => setNoResumeName(e.target.value.slice(0, 50))}
                       maxLength={50}
                       className="mt-2"
@@ -513,7 +611,7 @@ export default function InterviewSetupPage() {
                     <Input
                       placeholder="eg: abc@mail.com"
                       type="email"
-                      value={noResumeEmail || "mokshbhardwaj2333@mail.com"}
+                      value={noResumeEmail || ""}
                       onChange={(e) => setNoResumeEmail(e.target.value.slice(0, 100))}
                       maxLength={100}
                       className="mt-2"
@@ -685,35 +783,35 @@ export default function InterviewSetupPage() {
 
                 {/* Personal Info */}
                 <div className="border p-6 rounded-lg">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="font-medium text-foreground">Name</label>
-                    <Input value={resumeData.name || ""} disabled className="mt-2 bg-muted" />
-                  </div>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="font-medium text-foreground">Name</label>
+                      <Input value={resumeData.name || ""} disabled className="mt-2 bg-muted" />
+                    </div>
 
-                  <div>
-                    <label className="font-medium text-foreground">Email</label>
-                    <Input
-                      type="email"
-                      value={resumeData.email || ""}
-                      onChange={(e) => updateResumeData("email", e.target.value.slice(0, 100))}
-                      maxLength={100}
-                      className="mt-2"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">{resumeData.email.length}/100</p>
-                  </div>
+                    <div>
+                      <label className="font-medium text-foreground">Email</label>
+                      <Input
+                        type="email"
+                        value={resumeData.email || ""}
+                        onChange={(e) => updateResumeData("email", e.target.value.slice(0, 100))}
+                        maxLength={100}
+                        className="mt-2"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">{resumeData.email.length}/100</p>
+                    </div>
 
-                  <div>
-                    <label className="font-medium text-foreground">Phone Number</label>
-                    <Input
-                      value={resumeData.phone || ""}
-                      onChange={(e) => updateResumeData("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                      maxLength={10}
-                      placeholder="eg: 987654XXX"
-                      className="mt-2"
-                    />
+                    <div>
+                      <label className="font-medium text-foreground">Phone Number</label>
+                      <Input
+                        value={resumeData.phone || ""}
+                        onChange={(e) => updateResumeData("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        maxLength={10}
+                        placeholder="eg: 987654XXX"
+                        className="mt-2"
+                      />
+                    </div>
                   </div>
-                </div>
                 </div>
 
 
@@ -813,8 +911,8 @@ export default function InterviewSetupPage() {
                           />
                           <Input
                             className="border-border"
-                            placeholder="Job Title..."
-                            value={exp.title || "Employee"}
+                            placeholder="Job Title (e.g. Software Engineer)"
+                            value={exp.title || ""}
                             onChange={(e) => {
                               const updated = [...resumeData.experience]
                               updated[i].title = e.target.value.slice(0, 100)
