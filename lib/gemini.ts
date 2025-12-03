@@ -145,7 +145,7 @@ function buildResumeContext(role: string, resumeData: ResumeData, domainDesc: st
 Domain: ${domainDesc}
 Soft Skills Focus: Communication, teamwork, motivation, career goals
 Key Points from Resume:
-- Experience: ${resumeData.experience.map(e => `${e.title} at ${e.company}`).join(" → ")}
+- Experience: ${resumeData.experience.map(e => `${e.position} at ${e.company}`).join(" → ")}
 - Skills: ${resumeData.skills.slice(0, 8).join(", ")}
 - Summary: ${resumeData.summary || "Not provided"}`
   }
@@ -157,7 +157,7 @@ Focus on: Projects, technologies, problem-solving, architecture
 From Resume:
 - Skills: ${resumeData.skills.join(", ")}
 - Projects: ${resumeData.projects.map(p => p.name).join(", ") || "None listed"}
-- Recent Roles: ${resumeData.experience.slice(0, 2).map(e => e.title).join(", ")}`
+- Recent Roles: ${resumeData.experience.slice(0, 2).map(e => e.position).join(", ")}`
   }
 
   return ""

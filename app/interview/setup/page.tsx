@@ -444,8 +444,8 @@ export default function InterviewSetupPage() {
               {/* Mobile & Tablet: Beautiful Vertical Flow – Perfectly Aligned with Desktop */}
               <div className="lg:hidden grid grid-cols-1 sm:grid-cols-3 gap-10 max-w-5xl mx-auto px-4">
                 {rounds.map((r, index) => (
-                  <div className="#">
-                    <div key={r.round} className={`liquid-bg relative pt-12 pb-10 px-8 rounded-3xl shadow-xl border-2 border-white transform transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:border-primary/30${r.delay}`}
+                  <div key={r.round} className="flex flex-col items-center">
+                    <div className={`liquid-bg relative pt-12 pb-10 px-8 rounded-3xl shadow-xl border-2 border-white transform transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:border-primary/30 ${r.delay}`}
                       style={{
                         backgroundImage: `linear-gradient(135deg, ${r.color.split(" ")[1]}08, transparent 70%)`,
                       }}
@@ -472,12 +472,11 @@ export default function InterviewSetupPage() {
                           {r.desc}
                         </p>
                       </div>
-
-
                     </div>
+
                     {/* Vertical Connector – Only between cards (not after last) */}
                     {index < rounds.length - 1 && (
-                      <div className="flex justify-center mt-10">
+                      <div className="flex justify-center mt-10 w-full">
                         <div className="relative">
                           {/* Animated Arrow Down */}
                           <div className="absolute p-3 -bottom-8 left-1/2 -translate-x-1/2">
@@ -493,8 +492,6 @@ export default function InterviewSetupPage() {
                   </div>
                 ))}
               </div>
-
-
               {/* Fun note */}
               <div className="text-center mt-12">
                 <p className="text-lg italic text-muted-foreground">

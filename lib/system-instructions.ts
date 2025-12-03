@@ -114,7 +114,7 @@ function buildResumeContext(resumeData: ResumeData, domain: string): string {
   const skills = resumeData.skills.slice(0, 10).join(", ")
   const companies = resumeData.experience
     .slice(0, 3)
-    .map(e => `${e.title} at ${e.company}`)
+    .map(e => `${e.position} at ${e.company}`)
     .join(" → ")
   const projects = resumeData.projects.slice(0, 2).map(p => p.name).join(", ")
 
