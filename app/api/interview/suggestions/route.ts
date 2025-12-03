@@ -46,10 +46,12 @@ export async function POST(request: NextRequest) {
       }))
       .join("\n\n")
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "")
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+    let suggestions = ""
+    try {
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "")
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
 
-    const suggestionPrompt = `You are a ${roleTitle} interviewer providing overall feedback after the ${roleTitle} round of interviews.
+      const suggestionPrompt = `You are a ${roleTitle} interviewer providing overall feedback after the ${roleTitle} round of interviews.
 
 CONVERSATION:
 ${questionsAndAnswers}
@@ -61,8 +63,18 @@ Provide 2-3 key suggestions for ${candidateName} based on their performance in t
 
 Format: Natural, conversational feedback (3-4 sentences total). NOT a list. Make it sound like a real interviewer speaking.`
 
-    const result = await model.generateContent(suggestionPrompt)
-    const suggestions = result.response.text().trim()
+      const result = await model.generateContent(suggestionPrompt)
+      suggestions = result.response.text().trim()
+    } catch (aiErr) {
+      console.error("Suggestions generation failed, using fallback:", aiErr)
+      suggestions = `${roleTitle} feedback: Good job overall. Focus on structuring answers with a clear example and sharpening technical depth where needed. Keep confidence high and engage the interviewer with concise, targeted responses.`
+    }
+
+    // Persist suggestions to interviews collection
+    await db.collection("interviews").updateOne(
+      { _id: new ObjectId(sessionId) },
+      { $set: { [`roundSuggestions.${round}`]: suggestions } }
+    )
 
     return NextResponse.json({
       success: true,

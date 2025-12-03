@@ -27,6 +27,7 @@ export default function InterviewRoomPage() {
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
   const [suggestionsText, setSuggestionsText] = useState<string | null>(null);
+  const [roundEvaluation, setRoundEvaluation] = useState<any | null>(null);
   const [transcript, setTranscript] = useState<{ type: "question" | "answer"; text: string }[]>([]);
   const [questionReady, setQuestionReady] = useState(false);
   const [asideWidth, setAsideWidth] = useState<number>(384);
@@ -35,6 +36,8 @@ export default function InterviewRoomPage() {
 
   const userInitial = user?.name?.[0]?.toUpperCase() || "U";
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const desktopTranscriptRef = useRef<HTMLDivElement | null>(null);
+  const mobileTranscriptRef = useRef<HTMLDivElement | null>(null);
   const startXRef = useRef(0);
   const startWidthRef = useRef(asideWidth);
 
@@ -50,17 +53,100 @@ export default function InterviewRoomPage() {
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) router.push("/auth/login");
-    if (sessionId && isLoggedIn) startRound("hr");
+    const init = async () => {
+      if (!sessionId || !isLoggedIn) return
+      try {
+        const token = localStorage.getItem('authToken')
+        const res = await fetch(`/api/interview/session?sessionId=${sessionId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        })
+        if (!res.ok) {
+          startRound('hr')
+          return
+        }
+        const data = await res.json()
+        const sess = data.session
+        if (sess?.status === 'paused') {
+          // restore core state from session: role, currentRound, transcript and questions
+          setCurrentRole(sess.role || 'hr')
+          setRound(sess.currentRound || 1)
+          setPhase('BREAK')
+          setGreetingText(null)
+          // restore transcript from saved questions/answers
+          const transcriptItems: any[] = []
+          if (Array.isArray(sess.questions)) {
+            sess.questions.forEach((q: any) => transcriptItems.push({ type: 'question', text: q.text }))
+          }
+          if (Array.isArray(sess.answers)) {
+            sess.answers.forEach((a: any) => transcriptItems.push({ type: 'answer', text: a.text || a.userAnswer || '' }))
+          }
+          if (transcriptItems.length > 0) setTranscript(transcriptItems)
+          // show paused state with no video
+          setVideoUrl(null)
+        } else {
+          // active session: restore and continue
+          setCurrentRole(sess.role || 'hr')
+          setRound(sess.currentRound || 1)
+          // Restore transcript
+          const transcriptItems: any[] = []
+          if (Array.isArray(sess.questions)) {
+            sess.questions.forEach((q: any) => transcriptItems.push({ type: 'question', text: q.text }))
+          }
+          if (Array.isArray(sess.answers)) {
+            sess.answers.forEach((a: any) => transcriptItems.push({ type: 'answer', text: a.text || a.userAnswer || '' }))
+          }
+          if (transcriptItems.length > 0) setTranscript(transcriptItems)
+          // If session has a pending question, fetch it
+          startRound(sess?.role || 'hr')
+        }
+      } catch (err) {
+        startRound('hr')
+      }
+    }
+
+    init()
   }, [isLoading, isLoggedIn, sessionId]);
 
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // When newest message is at top, scroll container to top to show latest
+    try {
+      if (desktopTranscriptRef.current) desktopTranscriptRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) { }
+    try {
+      if (mobileTranscriptRef.current) mobileTranscriptRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) { }
   }, [transcript]);
 
   useEffect(() => {
+    // mark presence when mounting and cleanup on unmount
+    const joinSession = async () => {
+      try {
+        const token = localStorage.getItem('authToken')
+        await fetch('/api/interview/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : undefined },
+          body: JSON.stringify({ sessionId }),
+        })
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    joinSession()
+
     return () => {
       cleanup();
       if (currentAudioUrl.current) URL.revokeObjectURL(currentAudioUrl.current);
+      try {
+        const token = localStorage.getItem('authToken')
+        fetch('/api/interview/leave', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : undefined },
+          body: JSON.stringify({ sessionId }),
+        })
+      } catch (err) {
+        // ignore
+      }
     };
   }, []);
 
@@ -78,10 +164,25 @@ export default function InterviewRoomPage() {
   };
 
   const getMaxQuestionsForRole = (role: Role): number => {
-    if (role === "hr") return 1;
-    if (role === "expert") return 2;
-    if (role === "manager") return 3;
-    return 1;
+    // Fixed to 5 questions per round for all roles
+    return 5;
+  };
+
+  const getVideoForPhase = (role: Role, p: Phase | string) => {
+    switch (p) {
+      case "GREET":
+        return `/videos/${role}/greet.mp4`;
+      case "QUESTION":
+        return `/videos/${role}/question.mp4`;
+      case "LISTENING":
+        return `/videos/${role}/listening.mp4`;
+      case "FEEDBACK":
+      case "SUGGESTIONS":
+      case "EVALUATING":
+        return `/videos/${role}/conversation.mp4`;
+      default:
+        return null;
+    }
   };
 
   const startRound = (role: Role) => {
@@ -98,39 +199,58 @@ export default function InterviewRoomPage() {
     currentAnswer.current = "";
     audioChunksRef.current = [];
 
-    setTimeout(() => fetchGreeting(), 500);
+    setTimeout(() => fetchGreeting(role), 500);
   };
 
-  const speak = async (text: string, role: Role) => {
+  const speak = async (text: string, role: Role, p?: Phase) => {
     if (!text.trim()) return Promise.resolve();
     return new Promise<void>((resolve) => {
       try {
         window.speechSynthesis?.cancel();
         setIsSpeaking(true);
+        // show interviewer video only while speaking (except during listening)
+        const phaseToUse = p ?? phase;
+        const v = getVideoForPhase(role, phaseToUse)
+        if (v) setVideoUrl(v)
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = "en-US";
         utterance.rate = 1.2;
         utterance.onend = () => {
           setIsSpeaking(false);
+          // hide interviewer video after speaking unless we're in LISTENING phase
+          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
+          // mark question ready when a question just finished speaking
+          if (phaseToUse === 'QUESTION') {
+            setQuestionReady(true);
+            setPhase('LISTENING');
+          }
           resolve();
         };
         utterance.onerror = () => {
           setIsSpeaking(false);
+          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
           resolve();
         };
         window.speechSynthesis.speak(utterance);
         setTimeout(() => {
           setIsSpeaking(false);
+          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
+          // ensure questionReady if this was a question
+          if (phaseToUse === 'QUESTION') {
+            setQuestionReady(true);
+            setPhase('LISTENING');
+          }
           resolve();
         }, 30000);
       } catch (err) {
         setIsSpeaking(false);
+        if ((p ?? phase) !== 'LISTENING') setVideoUrl(null)
         resolve();
       }
     });
   };
 
-  const fetchGreeting = async () => {
+  const fetchGreeting = async (roleArg?: Role) => {
     try {
       let candidateName = "there";
       try {
@@ -144,32 +264,40 @@ export default function InterviewRoomPage() {
         manager: `Good to meet you ${candidateName}, I’m Ryan Bhardwaj, Hiring Manager. This round focuses on leadership, ownership and past experience. Let’s proceed.`,
       };
 
-      const greeting = templates[currentRole] || `Hello ${candidateName}, let's begin.`;
+      const roleToUse = roleArg ?? currentRole;
+      const greeting = templates[roleToUse] || `Hello ${candidateName}, let's begin.`;
       setGreetingText(greeting);
       setPhase("GREET");
-      setVideoUrl(`/videos/${currentRole}/question.mp4`);
+      setVideoUrl(`/videos/${roleToUse}/greet.mp4`);
 
-      speak(greeting, currentRole).catch(() => { });
+      speak(greeting, roleToUse, 'GREET').catch(() => { });
 
       setTimeout(() => {
-        if (!isFetchingQuestionRef.current) fetchQuestion(1);
+        if (!isFetchingQuestionRef.current) fetchQuestion(1, roleToUse);
       }, 2500);
     } catch (err) {
-      setTimeout(() => fetchQuestion(1), 1000);
+      setTimeout(() => fetchQuestion(1, roleArg), 1000);
     }
   };
 
   const replayQuestion = async () => {
     if (currentQuestion) {
       setQuestionReady(false);
+      setPhase('QUESTION');
       setVideoUrl(`/videos/${currentRole}/question.mp4`);
-      speak(currentQuestion.text, currentRole)
-        .then(() => setQuestionReady(true))
-        .catch(() => setQuestionReady(true));
+      speak(currentQuestion.text, currentRole, 'QUESTION')
+        .then(() => {
+          setQuestionReady(true);
+          setPhase('LISTENING');
+        })
+        .catch(() => {
+          setQuestionReady(true);
+          setPhase('LISTENING');
+        });
     }
   };
 
-  const fetchQuestion = async (num: number) => {
+  const fetchQuestion = async (num: number, roleArg?: Role) => {
     try {
       if (isFetchingQuestionRef.current) return;
       isFetchingQuestionRef.current = true;
@@ -187,13 +315,15 @@ export default function InterviewRoomPage() {
         return [...prev, { type: "question", text: question.text }];
       });
       setCurrentQuestion(question);
+      const roleToUse = roleArg ?? currentRole;
       setPhase("QUESTION");
       setGreetingText(null);
       setFeedbackText(null);
-      setVideoUrl(`/videos/${currentRole}/question.mp4`);
-      speak(question.text, currentRole)
+      setVideoUrl(`/videos/${roleToUse}/question.mp4`);
+      speak(question.text, roleToUse, 'QUESTION')
         .then(() => setQuestionReady(true))
         .catch(() => setQuestionReady(true));
+      // Fallback in case speechSynthesis doesn't fire onend
       setTimeout(() => setQuestionReady(true), 12000);
     } catch (err) {
       setPhase("QUESTION");
@@ -217,7 +347,7 @@ export default function InterviewRoomPage() {
           sessionId,
           question: currentQuestion?.text,
           answer: currentAnswer.current,
-          round,
+          round
         }),
       });
 
@@ -226,7 +356,7 @@ export default function InterviewRoomPage() {
         setFeedbackText(feedback);
         setPhase("FEEDBACK");
         setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
-        await speak(feedback, currentRole).catch(() => { });
+        await speak(feedback, currentRole, 'FEEDBACK').catch(() => { });
         setFeedbackText(null);
         const maxQuestions = getMaxQuestionsForRole(currentRole);
         if (questionCount < maxQuestions) {
@@ -245,11 +375,33 @@ export default function InterviewRoomPage() {
   const fetchSuggestions = async () => {
     try {
       const token = localStorage.getItem("authToken");
+
+      // First call evaluation to get per-round scores
+      try {
+        const evalRes = await fetch("/api/interview/evaluate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : undefined,
+          },
+          body: JSON.stringify({ sessionId, round, role: currentRole }),
+        });
+        if (evalRes.ok) {
+          const evalJson = await evalRes.json();
+          setRoundEvaluation(evalJson);
+          setPhase("EVALUATING");
+          setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
+        }
+      } catch (e) {
+        console.error("Evaluation call failed", e);
+      }
+
+      // Then fetch suggestions as before
       const res = await fetch("/api/interview/suggestions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: token ? `Bearer ${token}` : undefined,
         },
         body: JSON.stringify({ sessionId, round }),
       });
@@ -259,7 +411,7 @@ export default function InterviewRoomPage() {
         setSuggestionsText(suggestions);
         setPhase("SUGGESTIONS");
         setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
-        await speak(suggestions, currentRole).catch(() => { });
+        await speak(suggestions, currentRole, 'SUGGESTIONS').catch(() => { });
         setSuggestionsText(null);
         setPhase("BREAK");
       }
@@ -387,8 +539,6 @@ export default function InterviewRoomPage() {
         const maxQuestions = getMaxQuestionsForRole(currentRole);
         if (questionCount >= maxQuestions) {
           setPhase("EVALUATING");
-          setTimeout(() => fetchSuggestions(), 1500);
-          return;
         }
         if (data.completed) {
           setPhase("COMPLETE");
@@ -423,9 +573,15 @@ export default function InterviewRoomPage() {
 
   const evaluateRound = () => {
     setPhase("EVALUATING");
-    setTimeout(() => {
+    // run evaluation + suggestions then go to break
+    setTimeout(async () => {
+      try {
+        await fetchSuggestions();
+      } catch (e) {
+        // ignore
+      }
       setPhase("BREAK");
-    }, 2000);
+    }, 800);
   };
 
   const handleVideoEnd = () => {
@@ -447,7 +603,7 @@ export default function InterviewRoomPage() {
 
   return (
     <main className="min-h-screen liquid-bg text-foreground flex flex-col">
-      <header className="bg-gradient-to-r from-card to-card/80 backdrop-blur-md border-b border-border/50 px-4 lg:px-6 py-3 lg:py-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
+      <header className="bg-black border-b border-border px-4 lg:px-6 py-3 lg:py-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
         <div className="flex items-center gap-2 lg:gap-4">
           <div className="w-2 h-2 lg:w-3 lg:h-3 bg-green-500 rounded-full animate-pulse shadow-lg" />
           <div className="min-w-0">
@@ -459,13 +615,40 @@ export default function InterviewRoomPage() {
             </p>
           </div>
         </div>
+        <div>
+          {phase === 'BREAK' && !videoUrl && (
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  const token = localStorage.getItem('authToken')
+                  await fetch('/api/interview/pause', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: token ? `Bearer ${token}` : undefined,
+                    },
+                    body: JSON.stringify({ sessionId, action: 'resume' }),
+                  })
+                } catch (err) {
+                  console.error('Failed to resume session', err)
+                }
+                setVideoUrl(`/videos/${currentRole}/question.mp4`)
+                setPhase('QUESTION')
+                fetchQuestion(questionCount)
+              }}
+            >
+              Resume Interview
+            </Button>
+          )}
+        </div>
 
       </header>
 
       <div className="flex-1 flex flex-col lg:flex-row gap-6 p-4 lg:p-6 relative">
         <section className="flex-1 relative min-h-96 lg:min-h-full">
 
-          <div className="relative h-96 lg:h-full bg-black shadow-2xl rounded-lg lg:rounded-2xl overflow-hidden">
+          <div className="relative h-96 border border-primary/50 lg:h-full bg-black shadow-2xl rounded-lg lg:rounded-2xl overflow-hidden">
             {videoUrl ? (
               <video
                 key={videoUrl}
@@ -477,21 +660,24 @@ export default function InterviewRoomPage() {
                 onEnded={handleVideoEnd}
                 className="w-full h-full rounded-lg lg:rounded-2xl border-2 lg:border-[3px] border-primary object-cover shadow-2xl ring-1 ring-white/90" />
             ) : (
-              <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
-                Loading...
-              </div>
+                  <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
+                    <div className="flex flex-col items-center gap-4">
+                      <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
+                      <p className="text-lg">{phase === 'BREAK' ? 'Now you can move to Next Round' : 'Loading...'}</p>
+                    </div>
+                  </div>
             )}
 
             {/* Overlays */}
-            {phase === "GREET" && greetingText && (
+            {/* {phase === "GREET" && greetingText && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/20 backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
                   <p className="text-base lg:text-2xl text-white leading-relaxed text-center animate-in fade-in">{greetingText}</p>
                 </div>
               </div>
-            )}
+            )} */}
             <div className="absolute top-0 left-0 z-40 items-center">
-              <div className="bg-black/30 text-white/80 font-medium text-sm py-2 px-5 rounded-lg border-2 border-primary shadow-lg backdrop-blur-md">
+              <div className="liquid-bg text-white/80 font-medium text-sm py-2 px-5 rounded-lg border border-primary/50 shadow-lg backdrop-blur-md">
                 {
                   {
                     hr: "HR – Mira Sharma",
@@ -504,8 +690,8 @@ export default function InterviewRoomPage() {
               </div>
 
             </div>
-            {/*
-            {phase === "QUESTION" && currentQuestion && (
+            
+            {/* {phase === "QUESTION" && currentQuestion && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/10 backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
 
@@ -567,9 +753,9 @@ export default function InterviewRoomPage() {
                   </div>
                 </div>
               </div>
-            )}
-            */}
-            {phase === "FEEDBACK" && feedbackText && (
+            )} */}
+           
+            {/* {phase === "FEEDBACK" && feedbackText && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/20 backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
                   <div className="flex justify-between items-start mb-6">
@@ -578,9 +764,37 @@ export default function InterviewRoomPage() {
                   </div>
                 </div>
               </div>
-            )}
+            )} */}
 
-            {phase === "SUGGESTIONS" && suggestionsText && (
+            {/* {phase === "EVALUATING" && roundEvaluation && (
+              <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
+                <div className="bg-black/20 backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
+                  <div className="mb-4">
+                    <p className="text-sm lg:text-lg text-white font-semibold">Round Summary</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    {roundEvaluation.scores && Object.entries(roundEvaluation.scores).map(([k, v]: any) => (
+                      <div key={k} className="bg-black/10 p-3 rounded-lg">
+                        <p className="text-xs text-muted-foreground uppercase">{k}</p>
+                        <p className="text-lg text-white font-bold">{Math.round(v as number)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {roundEvaluation.improvementTips && (
+                    <div className="text-sm text-white">
+                      <p className="font-medium">Improvement Tips:</p>
+                      <ul className="list-disc ml-5 mt-2">
+                        {roundEvaluation.improvementTips.map((t: string, i: number) => (
+                          <li key={i}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )} */}
+
+            {/* {phase === "SUGGESTIONS" && suggestionsText && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/20 backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
                   <div className="flex justify-between items-start mb-6">
@@ -589,7 +803,7 @@ export default function InterviewRoomPage() {
                   </div>
                 </div>
               </div>
-            )}
+            )} */}
           </div>
         </section>
 
@@ -623,13 +837,14 @@ export default function InterviewRoomPage() {
             </div>
 
             {/* Scrollable area with max-h-96 and professional custom scrollbar */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-6 max-h-105 custom-scrollbar-professional">
+            <div ref={desktopTranscriptRef} className="flex-1 overflow-y-auto p-2 space-y-6 max-h-105 custom-scrollbar-professional">
               {transcript.length === 0 ? (
                 <p className="text-center py-6 text-muted-foreground italic">
                   Questions & Answers will appear here...
                 </p>
               ) : (
-                transcript.map((item, i) => (
+                // show latest messages at top
+                [...transcript].reverse().map((item, i) => (
                   <div
                     key={i}
                     className={`flex gap-1 ${item.type === "answer" ? "flex-row-reverse" : ""} animate-in fade-in-50 duration-300`}
@@ -659,7 +874,6 @@ export default function InterviewRoomPage() {
                   </div>
                 ))
               )}
-              <div ref={transcriptEndRef} />
             </div>
           </Card>
           {/* Clean & Professional Floating Control Bar */}
@@ -668,22 +882,22 @@ export default function InterviewRoomPage() {
             {/* Auto-Submit Countdown – Top Center */}
             {isRecording && silenceCountdown !== null && (
               <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-black/80 backdrop-blur-xl border border-white/20 text-white px-3 py-2 rounded-2xl shadow-2xl">
+                <div className="bg-black/0 backdrop-blur-xl border border-white/20 text-white px-3 py-2 rounded-2xl shadow-2xl">
                   <p className="text-sm font-medium opacity-90">Auto-submitting in {silenceCountdown}</p>
                 </div>
               </div>
             )}
 
             {/* Floating Controls – Bottom Right */}
-            <div className="absolute bottom-8 right-8 pointer-events-auto">
-              <div className="flex items-center gap-5 bg-white/10 backdrop-blur-2xl border border-white/20 rounded-full p-4 shadow-2xl">
+            <div className="absolute bottom-20 lg:bottom-8 right-8 pointer-events-auto">
+              <div className="flex items-center gap-5 liquid-bg border border-white/20 rounded-full p-4 shadow-2xl">
 
                 {/* Mic Button – Main Action */}
                 <Button
                   size="lg"
                   variant="ghost"
-                  onClick={questionReady ? startRecording : undefined}
-                  disabled={!questionReady || isRecording}
+                  onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
+                  disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
                   className={`
           relative w-10 h-10 rounded-full p-0 transition-all duration-300 group
           ${!questionReady
@@ -695,7 +909,7 @@ export default function InterviewRoomPage() {
                     `}
                 >
                   {/* Tooltip – Only when ready & not recording */}
-                  {!isRecording && questionReady && (
+                  {!isRecording && questionReady && phase === 'LISTENING' && (
                     <div className="absolute -top-16 -translate-x-1/2 pointer-events-none">
                       <div className="relative bg-black text-white text-sm font-medium px-4 py-2.5 
                 rounded-xl shadow-xl backdrop-blur-md animate-pulse
@@ -722,7 +936,26 @@ export default function InterviewRoomPage() {
                 <Button
                   variant="destructive"
                   size="lg"
-                  onClick={() => router.push("/dashboard")}
+                  onClick={async () => {
+                    try {
+                      if (isRecording) {
+                        await submitAnswer()
+                      }
+
+                      const token = localStorage.getItem('authToken')
+                      await fetch('/api/interview/pause', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: token ? `Bearer ${token}` : undefined,
+                        },
+                        body: JSON.stringify({ sessionId, action: 'pause', currentRound: round, questionIndex: questionCount }),
+                      })
+                    } catch (err) {
+                      console.error('Failed to pause session', err)
+                    }
+                    router.push('/dashboard')
+                  }}
                   className="
           w-10 h-10 rounded-full p-0 
           bg-gradient-to-br from-red-600 to-red-700 
@@ -772,21 +1005,22 @@ export default function InterviewRoomPage() {
         {/* Mobile Transcript Sidebar */}
         <aside
           style={{ width: "100%" }}
-          className="flex flex-col gap-4 lg:hidden"
+          className="flex flex-col pb-20 gap-4 lg:hidden"
         >
-          <Card className="flex flex-col shadow-lg border bg-card w-full">
+          <Card className="flex flex-col pb-20 shadow-lg border-white/50 bg-card w-full">
             <div className="flex px-6 py-3 border-b border-border/80">
               <h3 className="font-bold text-lg text-foreground">Live Transcript</h3>
             </div>
 
             {/* Scrollable Transcript */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-6 max-h-[65vh] custom-scrollbar-professional">
+            <div ref={mobileTranscriptRef} className="flex-1 overflow-y-auto p-3 space-y-6 max-h-[65vh] custom-scrollbar-professional">
               {transcript.length === 0 ? (
                 <p className="text-center py-6 text-muted-foreground italic">
                   Questions & Answers will appear here...
                 </p>
               ) : (
-                transcript.map((item, i) => (
+                // show latest messages at top
+                [...transcript].reverse().map((item, i) => (
                   <div
                     key={i}
                     className={`flex gap-2 ${item.type === "answer" ? "flex-row-reverse" : ""
@@ -796,28 +1030,27 @@ export default function InterviewRoomPage() {
                       <img
                         src={`/videos/${currentRole}/profile.png`}
                         alt="Interviewer"
-                        className="w-10 h-10 rounded-full object-cover border-2 border-white/50 shadow-md flex-shrink-0"
+                        className="w-8 h-8 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
                       />
                     ) : (
-                      <div className="w-10 h-10 rounded-full border-2 border-white/50 bg-gradient-to-br from-green-500 to-green-600 text-white flex items-center justify-center font-bold text-lg shadow-md flex-shrink-0">
-                        {userInitial}
+                      <div className="w-10 h-10 rounded-full border-2 border-white/50 bg-gradient-to-br from-black-200 to-indigo-600 text-white/80 text-xs flex items-center justify-center shadow-md flex-shrink-0">
+                        You
                       </div>
                     )}
 
                     <div
-                      className={`max-w-[75%] px-4 py-3 rounded-2xl shadow-sm ${item.type === "question"
-                        ? "bg-primary/15 text-foreground"
-                        : "bg-muted text-muted-foreground"
+                       className={`max-w-[75%] px-4 py-3 mt-5 shadow-sm ${item.type === "question"
+                        ? "bg-primary/10 border text-foreground rounded-tr-4xl rounded-bl-4xl rounded-br-4xl"
+                        : "bg-muted border text-muted-foreground rounded-tl-4xl rounded-bl-4xl rounded-br-4xl"
                         }`}
                     >
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                      <p className="text-xs leading-relaxed leading-relaxed whitespace-pre-wrap">
                         {item.text || "..."}
                       </p>
                     </div>
                   </div>
                 ))
               )}
-              <div ref={transcriptEndRef} />
             </div>
           </Card>
 
@@ -836,15 +1069,15 @@ export default function InterviewRoomPage() {
             )}
 
             {/* Main Floating Buttons */}
-            <div className="absolute bottom-6 right-6 pointer-events-auto">
-              <div className="flex items-center gap-4 bg-white/10 backdrop-blur-2xl border border-white/20 rounded-full p-4 shadow-xl">
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-auto">
+              <div className="flex items-center gap-4 liquid-bg border border-white/50 rounded-full p-4 shadow-xl">
 
                 {/* Mic Button */}
                 <Button
                   size="lg"
                   variant="ghost"
-                  onClick={questionReady ? startRecording : undefined}
-                  disabled={!questionReady || isRecording}
+                  onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
+                  disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
                   className={`
             relative w-12 h-12 rounded-full p-0 transition-all duration-300
             ${!questionReady
@@ -855,7 +1088,7 @@ export default function InterviewRoomPage() {
                     }
           `}
                 >
-                  {!isRecording && questionReady && (
+                  {!isRecording && questionReady && phase === 'LISTENING' && (
                     <div className="absolute -top-14 left-1/2 -translate-x-1/2 pointer-events-none">
                       <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
                         Turn On Your Mic
@@ -874,7 +1107,26 @@ export default function InterviewRoomPage() {
                 <Button
                   variant="destructive"
                   size="lg"
-                  onClick={() => router.push("/dashboard")}
+                  onClick={async () => {
+                    try {
+                      if (isRecording) {
+                        await submitAnswer()
+                      }
+
+                      const token = localStorage.getItem('authToken')
+                      await fetch('/api/interview/pause', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: token ? `Bearer ${token}` : undefined,
+                        },
+                        body: JSON.stringify({ sessionId, action: 'pause', currentRound: round, questionIndex: questionCount }),
+                      })
+                    } catch (err) {
+                      console.error('Failed to pause session', err)
+                    }
+                    router.push('/dashboard')
+                  }}
                   className="
             w-12 h-12 rounded-full p-0 
             bg-gradient-to-br from-red-600 to-red-700 
