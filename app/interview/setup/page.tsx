@@ -36,6 +36,7 @@ export default function InterviewSetupPage() {
   const { user, isLoggedIn, isLoading } = useAuth()
   const [experience, setExperience] = useState("mid")
   const [domain, setDomain] = useState<string>("")
+  const [domainTouched, setDomainTouched] = useState(false)
   const domains = [
     {
       id: "software",
@@ -314,6 +315,8 @@ export default function InterviewSetupPage() {
   const canStartInterview = (() => {
     if (isSubmitting) return false
     if (!experience) return false
+    // Domain is required for all flows
+    if (!domain || domain.trim() === "") return false
     if (resumeSource === 'manual' || interviewWithoutResume) {
       const emailOk = noResumeEmail.trim() !== ""
       const nameOk = noResumeName.trim() !== ""
@@ -324,7 +327,10 @@ export default function InterviewSetupPage() {
     if (resumeSource === 'profile' || resumeSource === 'upload') {
       if (!resumeData) return false
       const resumePhoneOk = resumeData.phone ? /^\d{10}$/.test(resumeData.phone.replace(/\D/g, "")) : true
-      return resumePhoneOk
+      // Ensure resumeData has name and email
+      const nameOk = !!resumeData.name && resumeData.name.trim() !== ""
+      const emailOk = !!resumeData.email && resumeData.email.trim() !== ""
+      return resumePhoneOk && nameOk && emailOk
     }
 
     return false
@@ -530,12 +536,17 @@ export default function InterviewSetupPage() {
               <hr className="flex-grow p-1 border-white/50" />
               <div className="space-y-4">
                 <div>
+                  <label className="text-sm font-medium text-foreground">Domain <span className="text-destructive">*</span></label>
                   <Input
                     placeholder="Type your domain (e.g. Frontend, Data Science)"
                     value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                    className="mb-2"
+                    onChange={(e) => { setDomain(e.target.value); setDomainTouched(true) }}
+                    onBlur={() => setDomainTouched(true)}
+                    className="mb-2 mt-2"
                   />
+                  {domainTouched && (!domain || domain.trim() === "") && (
+                    <p className="text-xs text-destructive mt-1">Domain is required.</p>
+                  )}
                   <hr className="flex-grow border-white/50" />
                   <p className="text-xs text-muted-foreground mt-2">Or select from popular domains below:</p>
                 </div>
@@ -671,6 +682,9 @@ export default function InterviewSetupPage() {
 
                       <p className="text-sm md:text-lg font-semibold">{resumeFile ? resumeFile.name : "Choose file or drag it here"}</p>
                       <p className="text-xs text-muted-foreground">PDF, DOC or DOCX</p>
+                      {resumeData && (!resumeData.name || !resumeData.email) && (
+                        <p className="text-xs text-destructive mt-2">Parsed resume is missing name or email — please enter them below or upload another file.</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -867,6 +881,12 @@ export default function InterviewSetupPage() {
             {showResumeSummary && resumeData && (
               <div className="space-y-10 border-t pt-10 animate-fadeIn">
                 <h2 className="text-4xl font-semibold">Resume Information</h2>
+
+                {(!resumeData.name || !resumeData.email) && (
+                  <div className="p-3 rounded bg-yellow-50 border border-yellow-200">
+                    <p className="text-sm text-yellow-800">Parsed resume is missing a name or email. Please update the fields below — Name and Email are required to start the interview.</p>
+                  </div>
+                )}
 
                 {/* Personal Info */}
                 <div className="border p-6 rounded-lg">
