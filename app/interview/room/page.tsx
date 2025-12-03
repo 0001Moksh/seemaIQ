@@ -124,7 +124,10 @@ export default function InterviewRoomPage() {
         const token = localStorage.getItem('authToken')
         await fetch('/api/interview/join', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : undefined },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
           body: JSON.stringify({ sessionId }),
         })
       } catch (err) {
@@ -141,7 +144,10 @@ export default function InterviewRoomPage() {
         const token = localStorage.getItem('authToken')
         fetch('/api/interview/leave', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : undefined },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
           body: JSON.stringify({ sessionId }),
         })
       } catch (err) {
@@ -303,9 +309,8 @@ export default function InterviewRoomPage() {
       isFetchingQuestionRef.current = true;
       setQuestionReady(false);
       const token = localStorage.getItem("authToken");
-      const res = await fetch(`/api/interview/question?sessionId=${sessionId}&round=${round}&questionNum=${num}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`/api/interview/question?sessionId=${sessionId}&round=${round}&questionNum=${num}`, { headers });
       if (!res.ok) throw new Error();
       const { question } = await res.json();
       setCurrentQuestion(question);
@@ -340,8 +345,8 @@ export default function InterviewRoomPage() {
       const res = await fetch("/api/interview/feedback", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify({
           sessionId,
@@ -381,8 +386,8 @@ export default function InterviewRoomPage() {
         const evalRes = await fetch("/api/interview/evaluate", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: token ? `Bearer ${token}` : undefined,
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
           },
           body: JSON.stringify({ sessionId, round, role: currentRole }),
         });
@@ -400,8 +405,8 @@ export default function InterviewRoomPage() {
       const res = await fetch("/api/interview/suggestions", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : undefined,
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify({ sessionId, round }),
       });
@@ -530,7 +535,7 @@ export default function InterviewRoomPage() {
       const token = localStorage.getItem("authToken");
       const res = await fetch("/api/interview/submit-answer", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: form,
       });
 
@@ -626,7 +631,7 @@ export default function InterviewRoomPage() {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',
-                      Authorization: token ? `Bearer ${token}` : undefined,
+                      ...(token && { Authorization: `Bearer ${token}` }),
                     },
                     body: JSON.stringify({ sessionId, action: 'resume' }),
                   })
@@ -947,7 +952,7 @@ export default function InterviewRoomPage() {
                         method: 'POST',
                         headers: {
                           'Content-Type': 'application/json',
-                          Authorization: token ? `Bearer ${token}` : undefined,
+                          ...(token && { Authorization: `Bearer ${token}` }),
                         },
                         body: JSON.stringify({ sessionId, action: 'pause', currentRound: round, questionIndex: questionCount }),
                       })
@@ -1118,7 +1123,7 @@ export default function InterviewRoomPage() {
                         method: 'POST',
                         headers: {
                           'Content-Type': 'application/json',
-                          Authorization: token ? `Bearer ${token}` : undefined,
+                          ...(token && { Authorization: `Bearer ${token}` }),
                         },
                         body: JSON.stringify({ sessionId, action: 'pause', currentRound: round, questionIndex: questionCount }),
                       })
