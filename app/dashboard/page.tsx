@@ -13,6 +13,7 @@ interface InterviewAttempt {
   date: string
   score: number
   sessionId?: string
+  status: string
 }
 
 interface Stats {
@@ -207,30 +208,49 @@ export default function DashboardPage() {
                                 }
                               })()}
                             </p>
-                            <div className="mt-2 sm:mt-0 flex items-center gap-2 flex-wrap">
-                              <span className="px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded-full">
-                                {attempt.role.split("->").length} Round{attempt.role.split("->").length > 1 ? "s" : ""}
-                              </span>
-                              <p className="text-sm font-medium text-foreground/80">
-                                {new Date(attempt.date).toLocaleDateString("en-IN", {
-                                  day: "2-digit",
-                                  month: "short",
-                                  year: "numeric",
-                                })}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(attempt.date).toLocaleTimeString("en-IN", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: true,
-                                })}
-                              </p>
-                            </div>
+                                        <div className="mt-2 sm:mt-0 flex items-center gap-2 flex-wrap">
+                                          <span className="px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded-full">
+                                            {attempt.role.split("->").length} Round{attempt.role.split("->").length > 1 ? "s" : ""}
+                                          </span>
+                                          <p className="text-sm font-medium text-foreground/80">
+                                            {new Date(attempt.date).toLocaleDateString("en-IN", {
+                                              day: "2-digit",
+                                              month: "short",
+                                              year: "numeric",
+                                            })}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground">
+                                            {new Date(attempt.date).toLocaleTimeString("en-IN", {
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                              hour12: true,
+                                            })}
+                                          </p>
+                                          <span
+                                            className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                                              attempt.status === "completed" ? "bg-green-100 text-green-700" : attempt.status === "paused" ? "bg-yellow-100 text-yellow-800" : "bg-primary/10 text-primary"
+                                            }`}
+                                          >
+                                            {attempt.status}
+                                          </span>
+                                        </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-4">
                           <p className="text-2xl sm:text-3xl font-bold text-accent">{attempt.score}%</p>
+                          {attempt.status !== "completed" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                router.push(`/interview/room?sessionId=${attempt.sessionId}`)
+                              }}
+                            >
+                              Resume
+                            </Button>
+                          )}
                         </div>
 
                       </div>

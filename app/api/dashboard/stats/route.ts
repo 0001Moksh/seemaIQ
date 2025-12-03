@@ -12,25 +12,35 @@ export async function GET(request: NextRequest) {
 
     const db = await getDatabase()
 
+    // Include all interviews for this user (active, paused, completed)
     const interviews = await db
       .collection("interviews")
-      .find({ userId: new ObjectId(user.userId), status: "completed" })
+      .find({ userId: new ObjectId(user.userId) })
       .sort({ createdAt: -1 })
       .limit(100)
       .toArray()
 
     const totalInterviews = interviews.length
 
-    const scores = interviews.map((i: any) => i.finalScore || 0).filter((s: number) => s > 0)
+    // Average score only for completed interviews with a finalScore
+    const completedScores = interviews
+      .filter((i: any) => i.status === "completed")
+      .map((i: any) => i.finalScore || 0)
+      .filter((s: number) => s > 0)
 
     const averageScore =
-      scores.length > 0 ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : 0
+      completedScores.length > 0
+        ? Math.round(completedScores.reduce((a: number, b: number) => a + b, 0) / completedScores.length)
+        : 0
 
     const recentInterviews = interviews.slice(0, 5).map((i: any) => ({
-      id: i._id,
+      id: i._id.toString(),
       role: i.role,
       date: i.createdAt,
       score: i.finalScore || 0,
+      status: i.status || "active",
+      sessionId: i._id.toString(),
+      roundsCompleted: Math.max(0, (i.currentRound || 1) - 1),
     }))
 
     return NextResponse.json({
