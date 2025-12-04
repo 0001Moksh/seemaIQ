@@ -106,43 +106,81 @@ export default function InterviewSetupPage() {
   // When user selects "Use Profile", try to load saved profile and map to resumeData
   useEffect(() => {
     if (resumeSource !== 'profile') return
-    try {
-      const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : 'seemaiq_profile_guest'
-      const saved = localStorage.getItem(key)
-      if (!saved) return
-      const parsed = JSON.parse(saved)
-      // Normalize experience objects so UI uses `title` consistently.
-      const normalizedExperience = (parsed.experience || []).map((e: any) => ({
-        company: e.company || e.employer || "",
-        title: e.title || e.position || "",
-        duration: e.duration || e.years || "",
-      }))
+    ;(async () => {
+      try {
+        // Try server API first when logged in
+        let parsed: any = null
+        if (user) {
+          try {
+            const token = localStorage.getItem('authToken')
+            const res = await fetch('/api/profile', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+            if (res.ok) {
+              const json = await res.json()
+              if (json.profile && json.profile.data) parsed = json.profile.data
+            }
+          } catch (err) {
+            console.warn('Profile API fetch failed, falling back to localStorage', err)
+          }
+        }
 
-      const mapped: ResumeData = {
-        name: parsed.name || '',
-        email: parsed.email || '',
-        phone: parsed.phone || '',
-        summary: parsed.summary || '',
-        skills: parsed.skills || [],
-        experience: normalizedExperience,
-        education: parsed.education || [],
-        projects: parsed.projects || [],
-        certifications: parsed.certifications || [],
-        linkedin: parsed.linkedin,
-        github: parsed.github,
-        portfolio: parsed.portfolio,
-        location: parsed.location,
+        if (!parsed) {
+          let saved: string | null = null
+          if (user?.email) {
+            const email = String(user.email)
+            const keysToTry = [
+              `seemaiq_profile_${encodeURIComponent(email.toLowerCase())}`,
+              `seemaiq_profile_${encodeURIComponent(email)}`,
+              `seemaiq_profile_${email.toLowerCase()}`,
+              `seemaiq_profile_${email}`,
+            ]
+            for (const k of keysToTry) {
+              const s = localStorage.getItem(k)
+              if (s) { saved = s; break }
+            }
+          }
+
+          if (!saved) {
+            const nameKey = user?.name ? `seemaiq_profile_${encodeURIComponent(String(user.name))}` : null
+            if (nameKey) saved = localStorage.getItem(nameKey)
+          }
+
+          if (!saved) saved = localStorage.getItem('seemaiq_profile_guest')
+          if (!saved) return
+          parsed = JSON.parse(saved)
+        }
+        // Normalize experience objects so UI uses `title` consistently.
+        const normalizedExperience = (parsed.experience || []).map((e: any) => ({
+          company: e.company || e.employer || "",
+          title: e.title || e.position || "",
+          duration: e.duration || e.years || "",
+        }))
+
+        const mapped: ResumeData = {
+          name: parsed.name || '',
+          email: parsed.email || '',
+          phone: parsed.phone || '',
+          summary: parsed.summary || '',
+          skills: parsed.skills || [],
+          experience: normalizedExperience,
+          education: parsed.education || [],
+          projects: parsed.projects || [],
+          certifications: parsed.certifications || [],
+          linkedin: parsed.linkedin,
+          github: parsed.github,
+          portfolio: parsed.portfolio,
+          location: parsed.location,
+        }
+        // if profile contains a domain, set the domain input as well
+        if (parsed.domain && !domain) {
+          setDomain(parsed.domain)
+        }
+        setResumeData(mapped)
+        setShowResumeSummary(true)
+        setInterviewWithoutResume(false)
+      } catch (e) {
+        console.error('Failed to load saved profile for user', e)
       }
-      // if profile contains a domain, set the domain input as well
-      if (parsed.domain && !domain) {
-        setDomain(parsed.domain)
-      }
-      setResumeData(mapped)
-      setShowResumeSummary(true)
-      setInterviewWithoutResume(false)
-    } catch (e) {
-      console.error('Failed to load saved profile for user', e)
-    }
+    })()
   }, [resumeSource, user, domain])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -176,9 +214,7 @@ export default function InterviewSetupPage() {
 
       const parseResponse = await fetch("/api/interview/parse-resume", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       })
 
@@ -202,6 +238,21 @@ export default function InterviewSetupPage() {
         }
         setResumeData(normalized)
         setShowResumeSummary(true)
+        // If logged in, persist parsed resume to server profile so other devices can see it
+        try {
+          if (user) {
+            const token = localStorage.getItem('authToken')
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+            if (token) headers['Authorization'] = `Bearer ${token}`
+            await fetch('/api/profile', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(normalized),
+            })
+          }
+        } catch (e) {
+          console.warn('Failed to save parsed resume to server profile', e)
+        }
       } else {
         console.error("Failed to parse resume")
       }
@@ -260,7 +311,18 @@ export default function InterviewSetupPage() {
           certifications: [],
         }
       } else if (resumeSource === 'profile') {
-        finalResumeData = resumeData
+        // prefer resumeData, but fall back to authenticated user info
+        finalResumeData = resumeData || (user ? {
+          name: (user as any).name || '',
+          email: (user as any).email || '',
+          phone: '',
+          summary: '',
+          skills: [],
+          experience: [],
+          education: [],
+          projects: [],
+          certifications: [],
+        } : null)
       } else if (resumeSource === 'upload') {
         finalResumeData = resumeData
       }
@@ -317,21 +379,32 @@ export default function InterviewSetupPage() {
     if (!experience) return false
     // Domain is required for all flows
     if (!domain || domain.trim() === "") return false
+    // For manual flow: use manual fields
+    let nameVal: string | undefined = undefined
+    let emailVal: string | undefined = undefined
+
     if (resumeSource === 'manual' || interviewWithoutResume) {
-      const emailOk = noResumeEmail.trim() !== ""
-      const nameOk = noResumeName.trim() !== ""
-      const phoneOk = noResumePhone.trim() === "" || /^\d{10}$/.test(noResumePhone.trim())
-      return nameOk && emailOk && phoneOk
+      nameVal = noResumeName
+      emailVal = noResumeEmail
+    } else if (resumeSource === 'profile') {
+      // profile: prefer parsed resumeData, else fall back to authenticated user
+      if (resumeData) {
+        nameVal = resumeData.name
+        emailVal = resumeData.email
+      } else if (user) {
+        nameVal = (user as any).name
+        emailVal = (user as any).email
+      }
+    } else if (resumeSource === 'upload') {
+      // upload: require an uploaded/parsed resume (resumeData must exist)
+      if (!resumeData) return false
+      nameVal = resumeData.name
+      emailVal = resumeData.email
     }
 
-    if (resumeSource === 'profile' || resumeSource === 'upload') {
-      if (!resumeData) return false
-      const resumePhoneOk = resumeData.phone ? /^\d{10}$/.test(resumeData.phone.replace(/\D/g, "")) : true
-      // Ensure resumeData has name and email
-      const nameOk = !!resumeData.name && resumeData.name.trim() !== ""
-      const emailOk = !!resumeData.email && resumeData.email.trim() !== ""
-      return resumePhoneOk && nameOk && emailOk
-    }
+    const nameOk = !!nameVal && String(nameVal).trim() !== ""
+    const emailOk = !!emailVal && String(emailVal).trim() !== ""
+    return nameOk && emailOk
 
     return false
   })();

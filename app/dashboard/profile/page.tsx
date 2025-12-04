@@ -58,22 +58,61 @@ export default function ProfilePage() {
         if (!isLoading && !isLoggedIn) router.push("/auth/login")
 
         if (user) {
-            setProfile(p => ({ ...p, name: user.name || p.name, email: user.email || p.email }))
-            setInitialProfile(p => ({ ...p, name: user.name || p.name, email: user.email || p.email }))
+            const userEmail = user.email || ""
+            setProfile(p => ({ ...p, name: user.name || p.name, email: userEmail || p.email }))
+            setInitialProfile(p => ({ ...p, name: user.name || p.name, email: userEmail || p.email }))
         }
 
-        // Load per-user saved profile from localStorage to avoid cross-user leakage.
-        try {
-            const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
-            const saved = localStorage.getItem(key)
-            if (saved) {
-                const parsed = JSON.parse(saved)
-                setProfile(prev => ({ ...prev, ...parsed }))
-                setInitialProfile(prev => ({ ...prev, ...parsed }))
+        // If logged in, try loading profile from server API first. Otherwise fallback to localStorage.
+        (async () => {
+            try {
+                if (user) {
+                    try {
+                        const token = localStorage.getItem('authToken')
+                        const res = await fetch('/api/profile', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+                        if (res.ok) {
+                            const json = await res.json()
+                            if (json.profile && json.profile.data) {
+                                setProfile(prev => ({ ...prev, ...json.profile.data }))
+                                setInitialProfile(prev => ({ ...prev, ...json.profile.data }))
+                                return
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Profile API load failed, falling back to localStorage', err)
+                    }
+                }
+
+                // localStorage fallback
+                const possibleKeys: string[] = []
+                if (user?.email) {
+                    const email = String(user.email)
+                    possibleKeys.push(`seemaiq_profile_${encodeURIComponent(email.toLowerCase())}`)
+                    possibleKeys.push(`seemaiq_profile_${encodeURIComponent(email)}`)
+                    possibleKeys.push(`seemaiq_profile_${email.toLowerCase()}`)
+                    possibleKeys.push(`seemaiq_profile_${email}`)
+                }
+                if (user?.name) {
+                    possibleKeys.push(`seemaiq_profile_${encodeURIComponent(String(user.name))}`)
+                    possibleKeys.push(`seemaiq_profile_${String(user.name)}`)
+                }
+                possibleKeys.push("seemaiq_profile_guest")
+
+                let saved: string | null = null
+                for (const k of possibleKeys) {
+                    const s = localStorage.getItem(k)
+                    if (s) { saved = s; break }
+                }
+
+                if (saved) {
+                    const parsed = JSON.parse(saved)
+                    setProfile(prev => ({ ...prev, ...parsed }))
+                    setInitialProfile(prev => ({ ...prev, ...parsed }))
+                }
+            } catch (e) {
+                console.error("Failed to load saved profile", e)
             }
-        } catch (e) {
-            console.error("Failed to load saved profile", e)
-        }
+        })()
     }, [user, isLoading, isLoggedIn, router])
 
     useEffect(() => {
@@ -95,7 +134,7 @@ export default function ProfilePage() {
         setProfile(prev => ({ ...prev, [key]: value }))
     }
 
-    const saveProfile = () => {
+    const saveProfile = async () => {
         if (!profile.name || !profile.email) {
             toast({
                 title: "Missing required fields",
@@ -106,20 +145,36 @@ export default function ProfilePage() {
         }
 
         try {
-            const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
+            // Save to server API if logged in
+            if (user) {
+                const token = localStorage.getItem('authToken')
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+                if (token) headers['Authorization'] = `Bearer ${token}`
+                const res = await fetch('/api/profile', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(profile),
+                })
+                if (!res.ok) throw new Error('Save failed')
+                setInitialProfile({ ...profile })
+                toast({ title: 'Saved!', description: 'Your profile has been saved.' })
+                // Also persist a normalized copy locally for quick access
+                try {
+                    const email = (user as any)?.email ? String((user as any).email).toLowerCase() : null
+                    const key = email ? `seemaiq_profile_${encodeURIComponent(email)}` : "seemaiq_profile_guest"
+                    localStorage.setItem(key, JSON.stringify(profile))
+                } catch (e) { /* ignore */ }
+                return
+            }
+
+            // Not logged in: save to localStorage only
+            const email = (user as any)?.email ? String((user as any).email).toLowerCase() : null
+            const key = email ? `seemaiq_profile_${encodeURIComponent(email)}` : "seemaiq_profile_guest"
             localStorage.setItem(key, JSON.stringify(profile))
             setInitialProfile({ ...profile }) // Mark as saved
-            toast({
-                title: "Saved!",
-                description: "Your profile has been saved locally.",
-                duration: 3000,
-            })
+            toast({ title: "Saved!", description: "Your profile has been saved locally.", duration: 3000 })
         } catch (err) {
-            toast({
-                title: "Save failed",
-                description: "Could not save profile. Try again.",
-                variant: "destructive",
-            })
+            toast({ title: "Save failed", description: "Could not save profile. Try again.", variant: "destructive" })
         }
     }
 
@@ -152,10 +207,26 @@ export default function ProfilePage() {
             setInitialProfile(updated) // Auto-save after successful parse
             // Persist parsed resume to the user-specific localStorage key immediately to avoid cross-user leaks
             try {
-                const key = user?.email ? `seemaiq_profile_${encodeURIComponent(user.email)}` : "seemaiq_profile_guest"
+                const email = user?.email ? String(user.email).toLowerCase() : null
+                const key = email ? `seemaiq_profile_${encodeURIComponent(email)}` : "seemaiq_profile_guest"
                 localStorage.setItem(key, JSON.stringify(updated))
             } catch (e) {
                 console.warn("Failed to auto-save parsed resume to localStorage", e)
+            }
+            // If logged in, also persist parsed resume to server so other devices see it
+            try {
+                if (user) {
+                    const token = localStorage.getItem('authToken')
+                    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+                    if (token) headers['Authorization'] = `Bearer ${token}`
+                    await fetch('/api/profile', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(updated),
+                    })
+                }
+            } catch (e) {
+                console.warn('Failed to auto-save parsed resume to server profile', e)
             }
             toast({
                 title: "Resume Parsed!",
