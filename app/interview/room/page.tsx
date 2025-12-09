@@ -780,6 +780,17 @@ export default function InterviewRoomPage() {
 
   return (
     <main className="min-h-screen liquid-bg text-foreground flex flex-col">
+      {error && (
+        <div className="bg-red-500/20 text-red-100 px-4 py-3 text-sm flex items-center justify-between border-b border-red-500/30">
+          <span>{error.message}{error.retryAfter ? ` (retry after ~${error.retryAfter}s)` : ""}</span>
+          <button
+            className="text-red-100 hover:text-red-50 underline text-xs ml-4"
+            onClick={() => setError(null)}
+          >
+            dismiss
+          </button>
+        </div>
+      )}
       <header className="bg-black border-b border-border px-4 lg:px-6 py-3 lg:py-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
         <div className="flex items-center gap-2 lg:gap-4">
           <div className="w-2 h-2 lg:w-3 lg:h-3 bg-green-500 rounded-full animate-pulse shadow-lg" />
@@ -1073,8 +1084,8 @@ export default function InterviewRoomPage() {
             {/* Silence detected – countdown will start; user can interrupt by speaking */}
             {isRecording && silenceDetected && silenceCountdown === null && (
               <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-orange-600/90 backdrop-blur-xl border border-orange-400 text-white px-3 py-2 rounded-2xl shadow-2xl">
-                  <p className="text-sm font-bold opacity-100">🟠 Silence detected — countdown starting. Speak now to continue.</p>
+                <div className="bg-card backdrop-blur-xl border text-white px-3 py-2 rounded-2xl shadow-2xl">
+                  <p className="text-sm font-bold opacity-100">Silence detected — countdown starting. Speak now to continue.</p>
                 </div>
               </div>
             )}
@@ -1082,8 +1093,8 @@ export default function InterviewRoomPage() {
             {/* Auto-Submit Countdown – user can still speak to cancel */}
             {isRecording && silenceCountdown !== null && (
               <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-red-600/90 backdrop-blur-xl border border-red-400 text-white px-3 py-2 rounded-2xl shadow-2xl">
-                  <p className="text-sm font-bold opacity-100">⏱️ Auto-submitting in {silenceCountdown}s — speak now to continue</p>
+                <div className="bg-card backdrop-blur-xl border text-white px-3 py-2 rounded-2xl shadow-2xl">
+                  <p className="text-sm font-bold opacity-100">Auto-submitting in {silenceCountdown}s</p>
                 </div>
               </div>
             )}
