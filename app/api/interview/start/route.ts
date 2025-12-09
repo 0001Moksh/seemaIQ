@@ -11,12 +11,9 @@ export async function POST(request: NextRequest) {
     // 3. Generate first question based on role/experience
     // 4. Setup WebSocket connection for real-time communication
 
-    return NextResponse.json({
-      success: true,
-      sessionId: "session_" + Date.now(),
-      firstQuestion: "Can you tell me about yourself?",
-    })
+    return NextResponse.json({ error: "This endpoint has been removed" }, { status: 410 })
   } catch (error) {
-    return NextResponse.json({ error: "Failed to start interview" }, { status: 500 })
+      console.error("Start error:", error)
+      return NextResponse.json({ error: "Failed to start" }, { status: 500 })
   }
 }

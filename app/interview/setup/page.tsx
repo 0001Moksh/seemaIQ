@@ -342,17 +342,18 @@ export default function InterviewSetupPage() {
         return
       }
 
-      const response = await fetch("/api/interview/create", {
+      const response = await fetch("/api/interview/session/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: token ? `Bearer ${token}` : "",
         },
         body: JSON.stringify({
+          userId: user?.id || null,
           role: rounds[0], // Always start with HR (Round 1)
           experience,
-          domain,
           resumeData: finalResumeData,
+          questionsPerRound: 5,
         }),
       })
 
@@ -361,7 +362,7 @@ export default function InterviewSetupPage() {
         router.push(`/interview/room?sessionId=${data.sessionId}`)
       } else {
         const error = await response.json()
-        console.error("Failed to create interview:", error)
+        console.error("Failed to create interview session:", error)
       }
     } catch (error) {
       console.error("Failed to start interview:", error)

@@ -258,31 +258,47 @@ export default function InterviewRoomPage() {
 
   const fetchGreeting = async (roleArg?: Role) => {
     try {
-      let candidateName = "there";
-      try {
-        const sess = (window as any).__SESSION;
-        if (sess?.resumeData?.name) candidateName = sess.resumeData.name.split(" ")[0];
-      } catch { }
-
-      const templates: Record<string, string> = {
-        hr: `Hello ${candidateName}, I’m Mira Sharma from HR. In this round, we’ll focus on communication, attitude and workplace behavior. Let’s begin`,
-        expert: `Hi ${candidateName}, I’m Ashish Yadav, Domain Expert. I’ll be evaluating your problem-solving approach and your technical fundamentals. Ready to start?`,
-        manager: `Good to meet you ${candidateName}, I’m Ryan Bhardwaj, Hiring Manager. This round focuses on leadership, ownership and past experience. Let’s proceed.`,
-      };
-
       const roleToUse = roleArg ?? currentRole;
-      const greeting = templates[roleToUse] || `Hello ${candidateName}, let's begin.`;
-      setGreetingText(greeting);
-      setPhase("GREET");
-      setVideoUrl(`/videos/${roleToUse}/greet.mp4`);
+      const token = localStorage.getItem("authToken");
+      const res = await fetch("/api/interview/orchestrate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ action: "greet", role: roleToUse, resumeData: (window as any).__SESSION?.resumeData || {} }),
+      });
 
-      speak(greeting, roleToUse, 'GREET').catch(() => { });
+      if (res.status === 410) {
+        // fallback to local template greeting
+        const candidateName = (window as any).__SESSION?.resumeData?.name?.split(" ")[0] || "there";
+        const templates: Record<string, string> = {
+          hr: `Hello ${candidateName}, I’m Mira Sharma from HR. In this round, we’ll focus on communication, attitude and workplace behavior. Let’s begin`,
+          expert: `Hi ${candidateName}, I’m Ashish Yadav, Domain Expert. I’ll be evaluating your problem-solving approach and your technical fundamentals. Ready to start?`,
+          manager: `Good to meet you ${candidateName}, I’m Ryan Bhardwaj, Hiring Manager. This round focuses on leadership, ownership and past experience. Let’s proceed.`,
+        };
+        const greeting = templates[roleToUse] || `Hello ${candidateName}, let's begin.`;
+        setGreetingText(greeting);
+        setPhase("GREET");
+        setVideoUrl(`/videos/${roleToUse}/greet.mp4`);
+        speak(greeting, roleToUse, 'GREET').catch(() => { });
+        setTimeout(() => fetchQuestion(1, roleToUse), 2500);
+        return;
+      }
 
+      if (!res.ok) throw new Error("Failed to fetch greeting")
+      const json = await res.json()
+      const text = json.text || json?.meta?.text || ''
+      setGreetingText(text)
+      setPhase('GREET')
+      setVideoUrl(`/videos/${roleToUse}/greet.mp4`)
+      speak(text, roleToUse, 'GREET').catch(() => { })
       setTimeout(() => {
-        if (!isFetchingQuestionRef.current) fetchQuestion(1, roleToUse);
-      }, 2500);
+        if (!isFetchingQuestionRef.current) fetchQuestion(1, roleToUse)
+      }, 1200)
     } catch (err) {
-      setTimeout(() => fetchQuestion(1, roleArg), 1000);
+      // fallback: proceed to question
+      setTimeout(() => fetchQuestion(1, roleArg), 1000)
     }
   };
 
@@ -310,26 +326,44 @@ export default function InterviewRoomPage() {
       setQuestionReady(false);
       const token = localStorage.getItem("authToken");
       const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`/api/interview/question?sessionId=${sessionId}&round=${round}&questionNum=${num}`, { headers });
-      if (!res.ok) throw new Error();
-      const { question } = await res.json();
-      setCurrentQuestion(question);
-      setTranscript(prev => {
-        const last = prev[prev.length - 1];
-        if (last && last.type === "question" && last.text === question.text) return prev;
-        return [...prev, { type: "question", text: question.text }];
-      });
-      setCurrentQuestion(question);
+      // Use orchestrator to get question
       const roleToUse = roleArg ?? currentRole;
-      setPhase("QUESTION");
-      setGreetingText(null);
-      setFeedbackText(null);
-      setVideoUrl(`/videos/${roleToUse}/question.mp4`);
+      const prevQuestions = transcript.filter(t => t.type === 'question').map(q => q.text)
+      const res = await fetch(`/api/interview/orchestrate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ action: 'question', role: roleToUse, round, questionNum: num, previousQuestions: prevQuestions, resumeData: (window as any).__SESSION?.resumeData || {}, questionsPerRound: getMaxQuestionsForRole(roleToUse) })
+      })
+
+      if (res.status === 410) {
+        // endpoint removed — show fallback error question
+        setPhase('QUESTION')
+        setCurrentQuestion({ id: 'error', text: 'Questions are currently unavailable. Please try later.', round })
+        setQuestionReady(true)
+        return
+      }
+
+      if (!res.ok) throw new Error('Failed to load question')
+      const data = await res.json()
+      const qText = data.text || data?.question || ''
+      const question = { id: `orchestrator-${num}`, text: qText, round }
+      setCurrentQuestion(question)
+      setTranscript(prev => {
+        const last = prev[prev.length - 1]
+        if (last && last.type === 'question' && last.text === question.text) return prev
+        return [...prev, { type: 'question', text: question.text }]
+      })
+      setPhase('QUESTION')
+      setGreetingText(null)
+      setFeedbackText(null)
+      setVideoUrl(`/videos/${roleToUse}/question.mp4`)
       speak(question.text, roleToUse, 'QUESTION')
         .then(() => setQuestionReady(true))
-        .catch(() => setQuestionReady(true));
-      // Fallback in case speechSynthesis doesn't fire onend
-      setTimeout(() => setQuestionReady(true), 12000);
+        .catch(() => setQuestionReady(true))
+      setTimeout(() => setQuestionReady(true), 12000)
     } catch (err) {
       setPhase("QUESTION");
       setCurrentQuestion({ id: "error", text: "Failed to load question. Please refresh.", round });
@@ -341,85 +375,80 @@ export default function InterviewRoomPage() {
 
   const fetchFeedback = async () => {
     try {
-      const token = localStorage.getItem("authToken");
-      const res = await fetch("/api/interview/feedback", {
-        method: "POST",
+      const token = localStorage.getItem('authToken')
+      const res = await fetch('/api/interview/orchestrate', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          sessionId,
-          question: currentQuestion?.text,
-          answer: currentAnswer.current,
-          round
-        }),
-      });
+        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, question: currentQuestion?.text, answer: currentAnswer.current, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole), sessionId }),
+      })
 
-      if (res.ok) {
-        const { feedback } = await res.json();
-        setFeedbackText(feedback);
-        setPhase("FEEDBACK");
-        setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
-        await speak(feedback, currentRole, 'FEEDBACK').catch(() => { });
-        setFeedbackText(null);
-        const maxQuestions = getMaxQuestionsForRole(currentRole);
+      if (res.status === 410) {
+        // removed — skip feedback
+        const maxQuestions = getMaxQuestionsForRole(currentRole)
         if (questionCount < maxQuestions) {
-          setQuestionCount(prev => prev + 1);
-          fetchQuestion(questionCount + 1);
+          setQuestionCount(prev => prev + 1)
+          fetchQuestion(questionCount + 1)
         } else {
-          evaluateRound();
+          evaluateRound()
         }
+        return
+      }
+
+      if (!res.ok) throw new Error('Failed to get feedback')
+      const data = await res.json()
+      const feedback = data.text || data?.meta?.improvement_is || (data.evaluation?.feedback) || 'Good.'
+      setFeedbackText(feedback)
+      setPhase('FEEDBACK')
+      setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
+      await speak(feedback, currentRole, 'FEEDBACK').catch(() => { })
+      setFeedbackText(null)
+      const maxQuestions = getMaxQuestionsForRole(currentRole)
+      if (questionCount < maxQuestions) {
+        setQuestionCount(prev => prev + 1)
+        fetchQuestion(questionCount + 1)
+      } else {
+        evaluateRound()
       }
     } catch (err) {
-      setQuestionCount(prev => prev + 1);
-      setTimeout(() => fetchQuestion(questionCount + 1), 1500);
+      setQuestionCount(prev => prev + 1)
+      setTimeout(() => fetchQuestion(questionCount + 1), 1500)
     }
   };
 
   const fetchSuggestions = async () => {
     try {
       const token = localStorage.getItem("authToken");
-
-      // First call evaluation to get per-round scores
-      try {
-        const evalRes = await fetch("/api/interview/evaluate", {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
-          },
-          body: JSON.stringify({ sessionId, round, role: currentRole }),
-        });
-        if (evalRes.ok) {
-          const evalJson = await evalRes.json();
-          setRoundEvaluation(evalJson);
-          setPhase("EVALUATING");
-          setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
-        }
-      } catch (e) {
-        console.error("Evaluation call failed", e);
-      }
-
-      // Then fetch suggestions as before
-      const res = await fetch("/api/interview/suggestions", {
-        method: "POST",
+      // Use orchestrator evaluate to get round evaluation and suggestions
+      const evalRes = await fetch('/api/interview/orchestrate', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ sessionId, round }),
-      });
+        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, sessionId, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole) }),
+      })
 
-      if (res.ok) {
-        const { suggestions } = await res.json();
-        setSuggestionsText(suggestions);
-        setPhase("SUGGESTIONS");
-        setVideoUrl(`/videos/${currentRole}/conversation.mp4`);
-        await speak(suggestions, currentRole, 'SUGGESTIONS').catch(() => { });
-        setSuggestionsText(null);
-        setPhase("BREAK");
+      if (evalRes.status === 410) {
+        setPhase('BREAK')
+        return
       }
+
+      if (!evalRes.ok) throw new Error('Eval failed')
+      const evalJson = await evalRes.json()
+      setRoundEvaluation(evalJson.evaluation || evalJson)
+      setPhase('EVALUATING')
+      setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
+
+      const suggestions = evalJson.evaluation?.improvementTips || evalJson.meta?.improvement_is || evalJson.improvement_is || (Array.isArray(evalJson.improvement) ? evalJson.improvement.join('. ') : '') || 'Continue practicing and refining your answers.'
+      setSuggestionsText(Array.isArray(suggestions) ? suggestions.join(' ') : suggestions)
+      setPhase('SUGGESTIONS')
+      setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
+      await speak(typeof suggestions === 'string' ? suggestions : suggestions.join(' '), currentRole, 'SUGGESTIONS').catch(() => { })
+      setSuggestionsText(null)
+      setPhase('BREAK')
     } catch (err) {
       setPhase("BREAK");
     }
@@ -524,38 +553,50 @@ export default function InterviewRoomPage() {
       return;
     }
 
-    const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-    const form = new FormData();
-    form.append("sessionId", sessionId!);
-    form.append("questionId", currentQuestion.id);
-    form.append("userAnswer", currentAnswer.current);
-    if (blob.size > 0) form.append("audio", blob, "answer.webm");
-
+    // Send to orchestrator for evaluation (no server-side audio handling)
     try {
-      const token = localStorage.getItem("authToken");
-      const res = await fetch("/api/interview/submit-answer", {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
-      });
+      const token = localStorage.getItem('authToken')
+      const res = await fetch('/api/interview/orchestrate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, question: currentQuestion.text, answer: currentAnswer.current, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole), sessionId }),
+      })
 
-      if (res.ok) {
-        const data = await res.json();
-        const maxQuestions = getMaxQuestionsForRole(currentRole);
-        if (questionCount >= maxQuestions) {
-          setPhase("EVALUATING");
+      if (res.status === 410) {
+        // endpoint removed — advance locally
+        const shouldAskFollowUp = Math.random() > 0.7
+        if (questionCount < getMaxQuestionsForRole(currentRole) && !shouldAskFollowUp) {
+          setQuestionCount(prev => prev + 1)
+          setTimeout(() => fetchQuestion(questionCount + 1), 1500)
+        } else {
+          evaluateRound()
         }
-        if (data.completed) {
-          setPhase("COMPLETE");
-          setTimeout(() => router.push(`/interview/results?sessionId=${sessionId}`), 2000);
-          return;
-        }
-        if (data.question) {
-          fetchFeedback();
-          return;
-        }
+        return
       }
-    } catch (err) { }
+
+      if (!res.ok) throw new Error('Failed to submit answer')
+      const data = await res.json()
+      const maxQuestions = getMaxQuestionsForRole(currentRole)
+      if (questionCount >= maxQuestions) {
+        setPhase('EVALUATING')
+      }
+      if (data.meta?.interview_complete) {
+        setPhase('COMPLETE')
+        setTimeout(() => router.push(`/dashboard`), 2000)
+        return
+      }
+      // use feedback from orchestration
+      if (data.text || data.meta?.improvement_is || data.evaluation) {
+        setFeedbackText(data.text || data.meta?.improvement_is || (data.evaluation?.feedback || ''))
+        await speak(data.text || data.meta?.improvement_is || (data.evaluation?.feedback || ''), currentRole, 'FEEDBACK').catch(() => { })
+        setFeedbackText(null)
+      }
+    } catch (err) {
+      // ignore and continue
+    }
 
     const shouldAskFollowUp = Math.random() > 0.7;
     if (questionCount < 5 && !shouldAskFollowUp) {
@@ -993,7 +1034,7 @@ export default function InterviewRoomPage() {
                         startRound('manager');
                       } else {
                         setPhase("COMPLETE");
-                        setTimeout(() => router.push(`/interview/results?sessionId=${sessionId}`), 2000);
+                        setTimeout(() => router.push(`/dashboard`), 2000);
                       }
                     }}
                   >

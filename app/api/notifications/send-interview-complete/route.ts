@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Interview not completed" }, { status: 400 })
     }
 
-    const resultsUrl = `${process.env.APP_URL}/interview/results?sessionId=${sessionId}`
+    const resultsUrl = `${process.env.APP_URL}/dashboard`
 
     await sendEmail({
       to: userDoc.email,

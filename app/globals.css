@@ -12,7 +12,7 @@
     radial-gradient(circle at 50% 80%, #000000, transparent 90%);
   
   background-blend-mode: screen;
-  animation: liquidMove 16s infinite ease-in-out;
+  animation: liquidMove 50s infinite ease-in-out;
   background-size: 180% 180%;
 }
 

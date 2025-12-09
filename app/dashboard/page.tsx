@@ -184,7 +184,7 @@ export default function DashboardPage() {
                 {stats.recentInterviews.map((attempt) => (
                   <Link
                     key={attempt.id}
-                    href={`/interview/results?sessionId=${attempt.sessionId || attempt.id}`}
+                    href={`/dashboard`}
                     className="block"
                   >
                     <Card
