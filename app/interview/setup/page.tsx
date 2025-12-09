@@ -610,18 +610,17 @@ export default function InterviewSetupPage() {
               <hr className="flex-grow p-1 border-white/50" />
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-foreground">Domain <span className="text-destructive">*</span></label>
                   <Input
                     placeholder="Type your domain (e.g. Frontend, Data Science)"
                     value={domain}
                     onChange={(e) => { setDomain(e.target.value); setDomainTouched(true) }}
                     onBlur={() => setDomainTouched(true)}
-                    className="mb-2 mt-2"
+                    className="mb-2"
                   />
+                  <hr className="flex-grow border-white/50" />
                   {domainTouched && (!domain || domain.trim() === "") && (
                     <p className="text-xs text-destructive mt-1">Domain is required.</p>
                   )}
-                  <hr className="flex-grow border-white/50" />
                   <p className="text-xs text-muted-foreground mt-2">Or select from popular domains below:</p>
                 </div>
 

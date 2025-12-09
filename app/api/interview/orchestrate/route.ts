@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server"
-import { generateInterviewQuestion, evaluateInterviewAnswer } from "@/lib/gemini"
+import { generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError, switchGeminiApiKey } from "@/lib/gemini"
 import { getDatabase } from "@/lib/db"
 import { ObjectId } from "mongodb"
 
 type Role = "hr" | "technical" | "manager"
+
+const normalizeRole = (role: string): Role => {
+  if (role === "expert") return "technical"
+  if (role === "technical") return "technical"
+  if (role === "manager") return "manager"
+  return "hr"
+}
 
 async function greetText(role: Role, resumeName?: string) {
   const namestr = resumeName ? resumeName.split(" ")[0] : "there"
@@ -14,15 +21,17 @@ async function greetText(role: Role, resumeName?: string) {
 
 export async function handleOrchestrate(body: any) {
   const action: string = body.action || "greet"
-  const role: Role = (body.role || "hr") as Role
+  const role: Role = normalizeRole(body.role || "hr")
   const round: number = Number(body.round || 1)
   const previousQuestions: string[] = body.previousQuestions || []
   const resumeData = body.resumeData || {}
+  const domain = body.domain || resumeData?.domain
   const questionNum = Number(body.questionNum || 1)
+  const questionsPerRound = Number(body.questionsPerRound || 5)
 
   if (action === "greet") {
     const text = await greetText(role, resumeData?.name)
-    const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${0}/${body.questionsPerRound || 5}`, role, status: "greet" }
+    const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${0}/${questionsPerRound}`, role, status: "greet" }
     // persist session state if sessionId present
     if (body.sessionId) {
       try {
@@ -40,8 +49,9 @@ export async function handleOrchestrate(body: any) {
   }
 
   if (action === "question") {
-    const q = await generateInterviewQuestion(role === "technical" ? "technical" : role === "hr" ? "hr" : "manager", resumeData?.experience || "mid", round, previousQuestions, resumeData)
-    const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${questionNum - 1}/${body.questionsPerRound || 5}`, role, status: "question" }
+    const q = await generateInterviewQuestion(role === "technical" ? "technical" : role === "hr" ? "hr" : "manager", resumeData?.experience || "mid", round, previousQuestions, resumeData, domain)
+    const completedSoFar = Math.max(0, questionNum - 1)
+    const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${completedSoFar}/${questionsPerRound}`, role, status: "question" }
     if (body.sessionId) {
       try {
         const db = await getDatabase()
@@ -63,7 +73,6 @@ export async function handleOrchestrate(body: any) {
     const improvement_is = evalRes.feedback || ""
     const candidate_score = Math.round((evalRes.clarity + evalRes.relevance + evalRes.completeness + evalRes.confidence) / 4)
     const completedCount = Number(body.completedCount || 0) + 1
-    const questionsPerRound = Number(body.questionsPerRound || 5)
     const finished = completedCount >= questionsPerRound
     const meta = { improvement_is, candidate_score, interview_complete: finished, question_complete: `${completedCount}/${questionsPerRound}`, role, status: "conversation" }
     if (body.sessionId) {
@@ -90,6 +99,25 @@ export async function POST(request: Request) {
     return NextResponse.json(res)
   } catch (err: any) {
     console.error("Orchestrator error:", err)
-    return NextResponse.json({ error: err?.message || "Failed to orchestrate" }, { status: 500 })
+    
+    // Handle Gemini quota exceeded (429)
+    if (err instanceof QuotaExceededError) {
+      const retryAfter = err.retryAfterSeconds || 60
+      console.warn(`Gemini quota exceeded. Retry after ${retryAfter}s`)
+      return NextResponse.json(
+        { 
+          error: "API quota exceeded",
+          message: `Gemini API quota exceeded. Please try again in ${retryAfter} seconds.`,
+          code: "QUOTA_EXCEEDED",
+          retryAfter
+        },
+        { status: 429, headers: { "Retry-After": retryAfter.toString() } }
+      )
+    }
+
+    return NextResponse.json(
+      { error: err?.message || "Failed to orchestrate" }, 
+      { status: 500 }
+    )
   }
 }

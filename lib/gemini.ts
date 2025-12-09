@@ -2,7 +2,24 @@ import { GoogleGenerativeAI } from "@google/generative-ai"
 import type { ResumeData } from "./resume-parser"
 import { buildSystemInstruction, generateFollowUpQuestion, generateFinalFeedback } from "./system-instructions"
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "")
+let currentApiKeyIndex = 0
+
+function getGeminiClient() {
+  const apiKeys = [process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY2].filter(Boolean) as string[]
+  if (apiKeys.length === 0) throw new Error("No Gemini API keys configured")
+  return new GoogleGenerativeAI(apiKeys[currentApiKeyIndex % apiKeys.length])
+}
+
+export function switchGeminiApiKey() {
+  currentApiKeyIndex++
+}
+
+export class QuotaExceededError extends Error {
+  constructor(public retryAfterSeconds: number = 60) {
+    super("Gemini API quota exceeded. Please try again later.")
+    this.name = "QuotaExceededError"
+  }
+}
 
 export async function generateInterviewQuestion(
   role: "hr" | "technical" | "manager",
@@ -10,8 +27,9 @@ export async function generateInterviewQuestion(
   round: number,
   previousQuestions: string[] = [],
   resumeData?: ResumeData,
-  domain?: string, // ← Yeh naya parameter add kar
+  domain?: string,
 ): Promise<string> {
+  const genAI = getGeminiClient()
   const model = genAI.getGenerativeModel({ 
     model: "gemini-2.5-flash",
     generationConfig: { temperature: 0.7 }
@@ -83,7 +101,12 @@ Return only the question. Nothing else.`
       const result = await model.generateContent(introPrompt)
       const question = result.response.text().trim()
       if (question && question.length > 20 && !question.includes("**")) return question
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.status === 429) {
+        console.warn("HR intro: Gemini quota exceeded, switching API key")
+        switchGeminiApiKey()
+        throw new QuotaExceededError(err?.errorDetails?.[2]?.retryDelay ? parseInt(err.errorDetails[2].retryDelay) / 1000 : 60)
+      }
       console.warn("Gemini failed for HR intro, using fallback")
     }
   }
@@ -125,8 +148,13 @@ Question:`
     if (question && question.length > 15) {
       return question
     }
-  } catch (error) {
-    console.error("Gemini completely failed:", error)
+  } catch (err: any) {
+    if (err?.status === 429) {
+      console.warn("Question generation: Gemini quota exceeded, switching API key")
+      switchGeminiApiKey()
+      throw new QuotaExceededError(err?.errorDetails?.[2]?.retryDelay ? parseInt(err.errorDetails[2].retryDelay) / 1000 : 60)
+    }
+    console.error("Gemini question generation failed:", err)
   }
 
   // Final Fallback with Name + Domain
@@ -140,14 +168,19 @@ Question:`
 
 // Updated buildResumeContext to include domain
 function buildResumeContext(role: string, resumeData: ResumeData, domainDesc: string): string {
+  const experiences = Array.isArray(resumeData?.experience) ? resumeData.experience : []
+  const skills = Array.isArray(resumeData?.skills) ? resumeData.skills : []
+  const projects = Array.isArray(resumeData?.projects) ? resumeData.projects : []
+  const summary = resumeData?.summary || "Not provided"
+
   if (role === "hr") {
     return `
 Domain: ${domainDesc}
 Soft Skills Focus: Communication, teamwork, motivation, career goals
 Key Points from Resume:
-- Experience: ${resumeData.experience.map(e => `${e.position} at ${e.company}`).join(" → ")}
-- Skills: ${resumeData.skills.slice(0, 8).join(", ")}
-- Summary: ${resumeData.summary || "Not provided"}`
+- Experience: ${experiences.map(e => `${e.position || "Role"} at ${e.company || "Company"}`).join(" → ") || "Not provided"}
+- Skills: ${skills.slice(0, 8).join(", ") || "Not provided"}
+- Summary: ${summary}`
   }
 
   if (role === "technical") {
@@ -155,12 +188,18 @@ Key Points from Resume:
 Technical Domain: ${domainDesc}
 Focus on: Projects, technologies, problem-solving, architecture
 From Resume:
-- Skills: ${resumeData.skills.join(", ")}
-- Projects: ${resumeData.projects.map(p => p.name).join(", ") || "None listed"}
-- Recent Roles: ${resumeData.experience.slice(0, 2).map(e => e.position).join(", ")}`
+- Skills: ${skills.join(", ") || "Not provided"}
+- Projects: ${projects.map(p => p.name || "Unnamed Project").join(", ") || "None listed"}
+- Recent Roles: ${experiences.slice(0, 2).map(e => e.position || "Role").join(", ") || "Not provided"}`
   }
 
-  return ""
+  // manager or fallback
+    return `
+Leadership Domain: ${domainDesc}
+Highlights:
+- Experience: ${experiences.map(e => `${e.position || "Role"} at ${e.company || "Company"}`).join(" → ") || "Not provided"}
+- Skills: ${skills.slice(0, 8).join(", ") || "Not provided"}
+- Summary: ${summary}`
 }
 
 export async function evaluateInterviewAnswer(
@@ -174,6 +213,7 @@ export async function evaluateInterviewAnswer(
   confidence: number
   feedback: string
 }> {
+  const genAI = getGeminiClient()
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
 
   const prompt = `You are an expert ${role} interviewer evaluating a candidate's response.
@@ -216,7 +256,12 @@ Respond with only valid JSON, no additional text.`
       confidence: Math.min(100, Math.max(0, evaluation.confidence || 0)),
       feedback: evaluation.feedback || "Good response",
     }
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.status === 429) {
+      console.warn("Evaluation: Gemini quota exceeded, switching API key")
+      switchGeminiApiKey()
+      throw new QuotaExceededError(error?.errorDetails?.[2]?.retryDelay ? parseInt(error.errorDetails[2].retryDelay) / 1000 : 60)
+    }
     console.error("Error parsing Gemini response:", error)
     // Return default scores if parsing fails
     return {

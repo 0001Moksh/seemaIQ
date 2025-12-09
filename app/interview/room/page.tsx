@@ -25,6 +25,8 @@ export default function InterviewRoomPage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const [silenceDetected, setSilenceDetected] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
   const [suggestionsText, setSuggestionsText] = useState<string | null>(null);
   const [roundEvaluation, setRoundEvaluation] = useState<any | null>(null);
@@ -32,7 +34,11 @@ export default function InterviewRoomPage() {
   const [questionReady, setQuestionReady] = useState(false);
   const [asideWidth, setAsideWidth] = useState<number>(384);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [breakTimer, setBreakTimer] = useState<number | null>(null);
+  const [roundScores, setRoundScores] = useState<Record<number, number>>({});
+  const [error, setError] = useState<{ message: string; retryAfter?: number } | null>(null);
   const isFetchingQuestionRef = useRef(false);
+  const breakTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const userInitial = user?.name?.[0]?.toUpperCase() || "U";
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -50,6 +56,8 @@ export default function InterviewRoomPage() {
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAnswer = useRef("");
   const currentAudioUrl = useRef<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) router.push("/auth/login");
@@ -159,9 +167,14 @@ export default function InterviewRoomPage() {
   const cleanup = () => {
     if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
     recorderRef.current?.stream?.getTracks().forEach(t => t.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
     recognitionRef.current?.stop();
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
+    if (breakTimerRef.current) clearInterval(breakTimerRef.current);
     window.speechSynthesis?.cancel();
     if (currentAudioUrl.current) {
       URL.revokeObjectURL(currentAudioUrl.current);
@@ -260,14 +273,28 @@ export default function InterviewRoomPage() {
     try {
       const roleToUse = roleArg ?? currentRole;
       const token = localStorage.getItem("authToken");
+      const domain = (window as any).__SESSION?.resumeData?.domain;
       const res = await fetch("/api/interview/orchestrate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: "greet", role: roleToUse, resumeData: (window as any).__SESSION?.resumeData || {} }),
+        body: JSON.stringify({ action: "greet", role: roleToUse, resumeData: (window as any).__SESSION?.resumeData || {}, domain }),
       });
+
+      // Handle Gemini quota exceeded (429)
+      if (res.status === 429) {
+        const errorData = await res.json().catch(() => ({}))
+        setError({
+          message: errorData.message || "API quota exceeded. Please try again in a moment.",
+          retryAfter: errorData.retryAfter
+        })
+        setGreetingText(null)
+        setPhase("GREET")
+        setVideoUrl(`/videos/${roleToUse}/greet.mp4`)
+        return
+      }
 
       if (res.status === 410) {
         // fallback to local template greeting
@@ -288,6 +315,7 @@ export default function InterviewRoomPage() {
 
       if (!res.ok) throw new Error("Failed to fetch greeting")
       const json = await res.json()
+  setError(null) // clear any previous error
       const text = json.text || json?.meta?.text || ''
       setGreetingText(text)
       setPhase('GREET')
@@ -298,6 +326,7 @@ export default function InterviewRoomPage() {
       }, 1200)
     } catch (err) {
       // fallback: proceed to question
+      setError({ message: "We hit a temporary error. Moving ahead to the question." })
       setTimeout(() => fetchQuestion(1, roleArg), 1000)
     }
   };
@@ -326,6 +355,7 @@ export default function InterviewRoomPage() {
       setQuestionReady(false);
       const token = localStorage.getItem("authToken");
       const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const domain = (window as any).__SESSION?.resumeData?.domain;
       // Use orchestrator to get question
       const roleToUse = roleArg ?? currentRole;
       const prevQuestions = transcript.filter(t => t.type === 'question').map(q => q.text)
@@ -335,8 +365,19 @@ export default function InterviewRoomPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: 'question', role: roleToUse, round, questionNum: num, previousQuestions: prevQuestions, resumeData: (window as any).__SESSION?.resumeData || {}, questionsPerRound: getMaxQuestionsForRole(roleToUse) })
+        body: JSON.stringify({ action: 'question', role: roleToUse, round, questionNum: num, previousQuestions: prevQuestions, resumeData: (window as any).__SESSION?.resumeData || {}, questionsPerRound: getMaxQuestionsForRole(roleToUse), domain })
       })
+
+      // Handle Gemini quota exceeded (429)
+      if (res.status === 429) {
+        const errorData = await res.json().catch(() => ({}))
+        setError({ 
+          message: errorData.message || "API quota exceeded. Please try again in a moment.",
+          retryAfter: errorData.retryAfter 
+        })
+        setQuestionReady(true)
+        return
+      }
 
       if (res.status === 410) {
         // endpoint removed — show fallback error question
@@ -348,6 +389,7 @@ export default function InterviewRoomPage() {
 
       if (!res.ok) throw new Error('Failed to load question')
       const data = await res.json()
+      setError(null) // Clear any previous errors
       const qText = data.text || data?.question || ''
       const question = { id: `orchestrator-${num}`, text: qText, round }
       setCurrentQuestion(question)
@@ -458,6 +500,7 @@ export default function InterviewRoomPage() {
     try {
       cleanup();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       recorderRef.current = recorder;
       audioChunksRef.current = [];
@@ -470,6 +513,9 @@ export default function InterviewRoomPage() {
       currentAnswer.current = "";
       hasSpoken.current = false;
       setSilenceCountdown(null);
+      setSilenceDetected(false);
+      setIsMuted(false);
+      lastActivityRef.current = Date.now();
       setTranscript(prev => [...prev, { type: "answer", text: "" }]);
 
       startSpeechRecognition();
@@ -501,6 +547,16 @@ export default function InterviewRoomPage() {
         currentAnswer.current += final;
         hasSpoken.current = true;
         updateLastAnswer(currentAnswer.current);
+        
+        // If user speaks during countdown, interrupt and restart timer
+        if (silenceCountdown !== null) {
+          setSilenceCountdown(null);
+          setSilenceDetected(false);
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+          }
+        }
+        
         resetSilenceTimer();
       }
       if (interim && hasSpoken.current) {
@@ -526,10 +582,18 @@ export default function InterviewRoomPage() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
     setSilenceCountdown(null);
+    setSilenceDetected(false);
+    setIsMuted(false);
+    lastActivityRef.current = Date.now();
 
     if (!hasSpoken.current) return;
 
+    // Step 1: Wait for 6 seconds of silence before showing countdown
     silenceTimerRef.current = setTimeout(() => {
+      // User has been silent for 6 seconds, show detection but DON'T mute yet
+      setSilenceDetected(true);
+      
+      // Step 2: Start countdown to auto-submit (user can still speak during this)
       let sec = 3;
       setSilenceCountdown(sec);
       countdownRef.current = setInterval(() => {
@@ -537,6 +601,21 @@ export default function InterviewRoomPage() {
         setSilenceCountdown(sec);
         if (sec <= 0) {
           clearInterval(countdownRef.current!);
+          // NOW mute and submit
+          setIsMuted(true);
+          
+          // Disable microphone input from browser
+          if (streamRef.current) {
+            streamRef.current.getAudioTracks().forEach(track => {
+              track.enabled = false;
+            });
+          }
+          
+          // Stop speech recognition
+          if (recognitionRef.current) {
+            recognitionRef.current.stop();
+          }
+          
           submitAnswer();
         }
       }, 1000);
@@ -565,12 +644,22 @@ export default function InterviewRoomPage() {
         body: JSON.stringify({ action: 'evaluate', role: currentRole, round, question: currentQuestion.text, answer: currentAnswer.current, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole), sessionId }),
       })
 
+      // Handle Gemini quota exceeded (429)
+      if (res.status === 429) {
+        const errorData = await res.json().catch(() => ({}))
+        setError({
+          message: errorData.message || "API quota exceeded. Please try again in a moment.",
+          retryAfter: errorData.retryAfter
+        })
+        return
+      }
+
       if (res.status === 410) {
-        // endpoint removed — advance locally
-        const shouldAskFollowUp = Math.random() > 0.7
-        if (questionCount < getMaxQuestionsForRole(currentRole) && !shouldAskFollowUp) {
+        // endpoint removed — advance locally through remaining questions
+        const maxQuestions = getMaxQuestionsForRole(currentRole)
+        if (questionCount < maxQuestions) {
           setQuestionCount(prev => prev + 1)
-          setTimeout(() => fetchQuestion(questionCount + 1), 1500)
+          setTimeout(() => fetchQuestion(questionCount + 1), 1200)
         } else {
           evaluateRound()
         }
@@ -579,29 +668,38 @@ export default function InterviewRoomPage() {
 
       if (!res.ok) throw new Error('Failed to submit answer')
       const data = await res.json()
+      setError(null)
       const maxQuestions = getMaxQuestionsForRole(currentRole)
       if (questionCount >= maxQuestions) {
         setPhase('EVALUATING')
       }
-      if (data.meta?.interview_complete) {
-        setPhase('COMPLETE')
-        setTimeout(() => router.push(`/dashboard`), 2000)
-        return
-      }
       // use feedback from orchestration
       if (data.text || data.meta?.improvement_is || data.evaluation) {
-        setFeedbackText(data.text || data.meta?.improvement_is || (data.evaluation?.feedback || ''))
-        await speak(data.text || data.meta?.improvement_is || (data.evaluation?.feedback || ''), currentRole, 'FEEDBACK').catch(() => { })
-        setFeedbackText(null)
+        const feedbackToShow = data.text || data.meta?.improvement_is || (data.evaluation?.feedback || '')
+        setFeedbackText(feedbackToShow)
+        setPhase('FEEDBACK')
+        await speak(feedbackToShow, currentRole, 'FEEDBACK').catch(() => { })
+        // Clear feedback after speech ends, then move to next question
+        setTimeout(() => {
+          setFeedbackText(null)
+          const maxQuestions = getMaxQuestionsForRole(currentRole)
+          if (questionCount < maxQuestions) {
+            setQuestionCount(prev => prev + 1)
+            setTimeout(() => fetchQuestion(questionCount + 1), 1200)
+          } else {
+            evaluateRound()
+          }
+        }, 3000)
+        return
       }
     } catch (err) {
       // ignore and continue
     }
 
-    const shouldAskFollowUp = Math.random() > 0.7;
-    if (questionCount < 5 && !shouldAskFollowUp) {
+    const maxQuestions = getMaxQuestionsForRole(currentRole);
+    if (questionCount < maxQuestions) {
       setQuestionCount(prev => prev + 1);
-      setTimeout(() => fetchQuestion(questionCount + 1), 1500);
+      setTimeout(() => fetchQuestion(questionCount + 1), 1200);
     } else {
       evaluateRound();
     }
@@ -627,7 +725,40 @@ export default function InterviewRoomPage() {
         // ignore
       }
       setPhase("BREAK");
+      // Start 30-second countdown
+      setBreakTimer(30);
+      if (breakTimerRef.current) clearTimeout(breakTimerRef.current);
+      breakTimerRef.current = setInterval(() => {
+        setBreakTimer(prev => {
+          if (prev === null || prev <= 1) {
+            if (breakTimerRef.current) clearInterval(breakTimerRef.current);
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     }, 800);
+  };
+
+  const moveToNextRound = () => {
+    const nextRoleMap: Record<Role, Role> = { hr: "expert", expert: "manager", manager: "hr" };
+    const nextRole = nextRoleMap[currentRole];
+    const nextRound = round + 1;
+    
+    if (nextRound > 3) {
+      // All rounds complete, go to results
+      setPhase("COMPLETE");
+      setTimeout(() => router.push("/dashboard"), 2000);
+      return;
+    }
+    
+    // Reset for next round
+    setQuestionCount(1);
+    setRound(nextRound);
+    setBreakTimer(null);
+    if (breakTimerRef.current) clearInterval(breakTimerRef.current);
+    setRoundScores({});
+    startRound(nextRole);
   };
 
   const handleVideoEnd = () => {
@@ -657,35 +788,49 @@ export default function InterviewRoomPage() {
               {currentRole.toUpperCase()} Round • Q{questionCount}/{getMaxQuestionsForRole(currentRole)}
             </h1>
             <p className="text-xs lg:text-sm text-muted-foreground mt-0.5 lg:mt-1 truncate">
-              {phase === 'GREET' ? 'Greeting…' : phase === 'QUESTION' ? 'Questioning…' : phase === 'LISTENING' ? 'Listening…' : phase === 'FEEDBACK' ? 'Feedback…' : phase === 'SUGGESTIONS' ? 'Suggestions…' : phase === 'EVALUATING' ? 'Evaluating…' : phase === 'BREAK' ? 'Break…' : phase === 'COMPLETE' ? 'Complete' : ''}
+              {phase === 'GREET' ? 'Greeting…' : phase === 'QUESTION' ? 'Questioning…' : phase === 'LISTENING' ? 'Listening…' : phase === 'FEEDBACK' ? 'Feedback…' : phase === 'SUGGESTIONS' ? 'Suggestions…' : phase === 'EVALUATING' ? 'Evaluating…' : phase === 'BREAK' ? `Break (${breakTimer !== null ? breakTimer + 's remaining' : 'Ready'})` : phase === 'COMPLETE' ? 'Complete' : ''}
             </p>
           </div>
         </div>
         <div>
           {phase === 'BREAK' && !videoUrl && (
-            <Button
-              size="sm"
-              onClick={async () => {
-                try {
-                  const token = localStorage.getItem('authToken')
-                  await fetch('/api/interview/pause', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      ...(token && { Authorization: `Bearer ${token}` }),
-                    },
-                    body: JSON.stringify({ sessionId, action: 'resume' }),
-                  })
-                } catch (err) {
-                  console.error('Failed to resume session', err)
-                }
-                setVideoUrl(`/videos/${currentRole}/question.mp4`)
-                setPhase('QUESTION')
-                fetchQuestion(questionCount)
-              }}
-            >
-              Resume Interview
-            </Button>
+            <div className="flex flex-col gap-3">
+              {breakTimer !== null && (
+                <div className="text-sm text-orange-500 font-semibold text-center">
+                  Continue in {breakTimer}s
+                </div>
+              )}
+              <Button
+                size="sm"
+                onClick={moveToNextRound}
+                disabled={breakTimer !== null && breakTimer > 0}
+                className={`transition-all ${breakTimer === null || breakTimer === 0 ? 'opacity-100' : 'opacity-50 cursor-not-allowed'}`}
+              >
+                {round >= 3 ? 'Complete Interview' : 'Continue to Next Round'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('authToken')
+                    await fetch('/api/interview/pause', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(token && { Authorization: `Bearer ${token}` }),
+                      },
+                      body: JSON.stringify({ sessionId, action: 'pause', currentRound: round, questionIndex: questionCount }),
+                    })
+                  } catch (err) {
+                    console.error('Failed to pause session', err)
+                  }
+                  router.push('/dashboard')
+                }}
+              >
+                Leave Interview
+              </Button>
+            </div>
           )}
         </div>
 
@@ -709,7 +854,7 @@ export default function InterviewRoomPage() {
                   <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
                     <div className="flex flex-col items-center gap-4">
                       <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
-                      <p className="text-lg">{phase === 'BREAK' ? 'Now you can move to Next Round' : 'Loading...'}</p>
+                      <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Ready to continue? Click "Continue to Next Round"') : 'Loading...'}</p>
                     </div>
                   </div>
             )}
@@ -801,16 +946,16 @@ export default function InterviewRoomPage() {
               </div>
             )} */}
            
-            {/* {phase === "FEEDBACK" && feedbackText && (
+            {phase === "FEEDBACK" && feedbackText && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
-                <div className="bg-black/20 backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
+                <div className="bg-black/20 backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
                   <div className="flex justify-between items-start mb-6">
                     <p className="text-sm lg:text-lg text-white leading-relaxed animate-in fade-in flex-1">{feedbackText}</p>
                     <Volume2 className="w-5 lg:w-6 h-5 lg:h-6 text-white/80 ml-4 flex-shrink-0" />
                   </div>
                 </div>
               </div>
-            )} */}
+            )}
 
             {/* {phase === "EVALUATING" && roundEvaluation && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
@@ -925,11 +1070,29 @@ export default function InterviewRoomPage() {
           {/* Clean & Professional Floating Control Bar */}
           <div className="fixed inset-0 pointer-events-none z-50">
 
-            {/* Auto-Submit Countdown – Top Center */}
+            {/* Silence detected – countdown will start; user can interrupt by speaking */}
+            {isRecording && silenceDetected && silenceCountdown === null && (
+              <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
+                <div className="bg-orange-600/90 backdrop-blur-xl border border-orange-400 text-white px-3 py-2 rounded-2xl shadow-2xl">
+                  <p className="text-sm font-bold opacity-100">🟠 Silence detected — countdown starting. Speak now to continue.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Auto-Submit Countdown – user can still speak to cancel */}
             {isRecording && silenceCountdown !== null && (
               <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-black/0 backdrop-blur-xl border border-white/20 text-white px-3 py-2 rounded-2xl shadow-2xl">
-                  <p className="text-sm font-medium opacity-90">Auto-submitting in {silenceCountdown}</p>
+                <div className="bg-red-600/90 backdrop-blur-xl border border-red-400 text-white px-3 py-2 rounded-2xl shadow-2xl">
+                  <p className="text-sm font-bold opacity-100">⏱️ Auto-submitting in {silenceCountdown}s — speak now to continue</p>
+                </div>
+              </div>
+            )}
+
+            {/* Muted state just before submit */}
+            {isRecording && isMuted && (
+              <div className="absolute bottom-10 right-25 -translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
+                <div className="bg-red-700/90 backdrop-blur-xl border border-red-500 text-white px-3 py-2 rounded-2xl shadow-2xl">
+                  <p className="text-sm font-bold opacity-100">🔇 Mic muted — submitting your answer</p>
                 </div>
               </div>
             )}
@@ -1103,12 +1266,34 @@ export default function InterviewRoomPage() {
           {/* Mobile Floating Controls */}
           <div className="fixed inset-0 pointer-events-none z-50">
 
-            {/* Auto Submit Banner */}
+            {/* Silence detected – countdown will start; user can interrupt by speaking */}
+            {isRecording && silenceDetected && silenceCountdown === null && (
+              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
+                <div className="bg-orange-600/80 backdrop-blur-xl border border-orange-400 text-white px-4 py-2 rounded-xl shadow-xl">
+                  <p className="text-sm font-bold opacity-95">
+                    🟠 Silence detected — speak now to continue
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Auto-Submit Countdown Banner – user can still speak to cancel */}
             {isRecording && silenceCountdown !== null && (
               <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-black/80 backdrop-blur-xl border border-white/20 text-white px-4 py-2 rounded-xl shadow-xl">
-                  <p className="text-sm font-medium opacity-90">
-                    Auto-submitting in {silenceCountdown}
+                <div className="bg-red-600/80 backdrop-blur-xl border border-red-400 text-white px-4 py-2 rounded-xl shadow-xl">
+                  <p className="text-sm font-bold opacity-95">
+                    ⏱️ Auto-submitting in {silenceCountdown}s — speak now to continue
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Muted state just before submit */}
+            {isRecording && isMuted && (
+              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
+                <div className="bg-red-700/80 backdrop-blur-xl border border-red-500 text-white px-4 py-2 rounded-xl shadow-xl">
+                  <p className="text-sm font-bold opacity-95">
+                    🔇 Mic muted — submitting your answer
                   </p>
                 </div>
               </div>
