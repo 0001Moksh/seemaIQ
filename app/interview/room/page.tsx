@@ -37,6 +37,7 @@ export default function InterviewRoomPage() {
   const [breakTimer, setBreakTimer] = useState<number | null>(null);
   const [roundScores, setRoundScores] = useState<Record<number, number>>({});
   const [error, setError] = useState<{ message: string; retryAfter?: number } | null>(null);
+  const [questionsPerRound, setQuestionsPerRound] = useState(5);
   const isFetchingQuestionRef = useRef(false);
   const breakTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -78,6 +79,7 @@ export default function InterviewRoomPage() {
           // restore core state from session: role, currentRound, transcript and questions
           setCurrentRole(sess.role || 'hr')
           setRound(sess.currentRound || 1)
+          setQuestionsPerRound(sess.questionsPerRound || 5)
           setPhase('BREAK')
           setGreetingText(null)
           // restore transcript from saved questions/answers
@@ -95,6 +97,7 @@ export default function InterviewRoomPage() {
           // active session: restore and continue
           setCurrentRole(sess.role || 'hr')
           setRound(sess.currentRound || 1)
+          setQuestionsPerRound(sess.questionsPerRound || 5)
           // Restore transcript
           const transcriptItems: any[] = []
           if (Array.isArray(sess.questions)) {
@@ -183,8 +186,7 @@ export default function InterviewRoomPage() {
   };
 
   const getMaxQuestionsForRole = (role: Role): number => {
-    // Fixed to 5 questions per round for all roles
-    return 5;
+    return questionsPerRound;
   };
 
   const getVideoForPhase = (role: Role, p: Phase | string) => {
@@ -533,8 +535,27 @@ export default function InterviewRoomPage() {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-IN";
+    let speechStarted = false;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    rec.onstart = () => {
+      speechStarted = false;
+      // Set timeout to abort if no speech detected within 15 seconds
+      timeoutId = setTimeout(() => {
+        if (!speechStarted && rec) {
+          rec.abort();
+          console.warn("Speech recognition timeout: no audio detected, aborting");
+        }
+      }, 15000);
+    };
 
     rec.onresult = (e: any) => {
+      // Mark that speech has started
+      if (!speechStarted) {
+        speechStarted = true;
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+
       let final = "";
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -564,7 +585,45 @@ export default function InterviewRoomPage() {
       }
     };
 
-    rec.onerror = (e: any) => console.error("Speech recognition error", e.error);
+    rec.onerror = (e: any) => {
+      if (timeoutId) clearTimeout(timeoutId);
+
+      const errorMessages: { [key: string]: string } = {
+        "no-speech": "No speech detected. Ensure your microphone is working and not muted.",
+        "audio-capture": "Microphone not found or permission denied. Check browser settings.",
+        "network": "Network error occurred. Check your connection.",
+        "aborted": "Speech recognition was interrupted.",
+        "service-not-allowed": "Speech recognition service unavailable.",
+      };
+      
+      const errorMsg = errorMessages[e.error] || `Speech error: ${e.error}`;
+      console.error("Speech recognition error:", e.error, "-", errorMsg);
+      
+      // For transient errors, auto-retry after a short delay
+      if (["no-speech", "audio-capture"].includes(e.error) && isRecording) {
+        console.warn("Auto-retrying speech recognition...");
+        setError({ message: errorMsg, retryAfter: 2 });
+        setTimeout(() => {
+          if (isRecording && recognitionRef.current !== rec) {
+            startSpeechRecognition();
+          }
+        }, 2000);
+      }
+    };
+
+    rec.onend = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      // If still recording but recognition ended, attempt to restart
+      if (isRecording && !hasSpoken.current && recognitionRef.current === rec) {
+        console.log("Speech recognition ended without speech, restarting...");
+        setTimeout(() => {
+          if (isRecording) {
+            startSpeechRecognition();
+          }
+        }, 1000);
+      }
+    };
+
     rec.start();
   };
 

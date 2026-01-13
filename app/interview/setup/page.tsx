@@ -37,6 +37,7 @@ export default function InterviewSetupPage() {
   const [experience, setExperience] = useState("mid")
   const [domain, setDomain] = useState<string>("")
   const [domainTouched, setDomainTouched] = useState(false)
+  const [questionsPerRound, setQuestionsPerRound] = useState(5)
   const domains = [
     {
       id: "software",
@@ -353,7 +354,7 @@ export default function InterviewSetupPage() {
           role: rounds[0], // Always start with HR (Round 1)
           experience,
           resumeData: finalResumeData,
-          questionsPerRound: 5,
+          questionsPerRound: questionsPerRound,
         }),
       })
 
@@ -647,7 +648,49 @@ export default function InterviewSetupPage() {
               </div>
             </section>
 
-            {/* Resume Upload / Manual Form */}
+            {/* Questions Per Round */}
+            <section className="mb-12">
+              <h2 className="text-3xl pt-6 font-semibold text-center mb-8">Number of Questions Per Round</h2>
+              <hr className="flex-grow p-1 border-white/50" />
+              <div className="max-w-md mx-auto space-y-4">
+                <p className="text-center text-muted-foreground mb-4">
+                  Select how many questions you want to answer in each interview round
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  {[3, 5, 7].map((num) => (
+                    <button
+                      key={num}
+                      onClick={() => setQuestionsPerRound(num)}
+                      className={`p-4 rounded-lg border-2 transition-all font-semibold text-lg ${
+                        questionsPerRound === num
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border hover:border-accent/50 text-foreground"
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-4">
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Custom number:</label>
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      type="number"
+                      min="1"
+                      max="15"
+                      value={questionsPerRound}
+                      onChange={(e) => {
+                        const val = Math.max(1, Math.min(15, parseInt(e.target.value) || 3))
+                        setQuestionsPerRound(val)
+                      }}
+                      className="w-full"
+                      placeholder="Enter custom number"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">Range: 1 - 15 questions per round</p>
+                </div>
+              </div>
+            </section>
             <div className="space-y-6">
               <h2 className="text-3xl font-semibold text-center">
                 Resume Submission
