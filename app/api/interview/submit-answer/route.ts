@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { transcribeAudio, evaluateInterviewAnswer } from "@/lib/gemini"
+import { transcribeAudio, evaluateInterviewAnswer } from "@/lib/groq"
 import { getDatabase } from "@/lib/db"
 import { ObjectId } from "mongodb"
 

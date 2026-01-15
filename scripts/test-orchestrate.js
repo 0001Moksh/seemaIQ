@@ -1,8 +1,8 @@
 ;(async () => {
   try {
-    const gemini = await import('../lib/gemini.js').catch(async (e) => {
+    const groq = await import('../lib/groq.js').catch(async (e) => {
       // Try importing TS source if JS build not present
-      return await import('../lib/gemini').catch(err => { throw err })
+      return await import('../lib/groq').catch(err => { throw err })
     })
 
     function greetText(role, resumeName) {
@@ -15,20 +15,20 @@
     console.log('GREET test')
     console.log(greetText('hr', 'Test Candidate'))
 
-    if (typeof gemini.generateInterviewQuestion === 'function') {
+    if (typeof groq.generateInterviewQuestion === 'function') {
       console.log('\nQUESTION test')
-      const q = await gemini.generateInterviewQuestion('technical', 'mid', 1, [], { experience: 'mid' })
+      const q = await groq.generateInterviewQuestion('technical', 'mid', 1, [], { experience: 'mid' })
       console.log(q)
     } else {
-      console.log('generateInterviewQuestion not exported from lib/gemini')
+      console.log('generateInterviewQuestion not exported from lib/groq')
     }
 
-    if (typeof gemini.evaluateInterviewAnswer === 'function') {
+    if (typeof groq.evaluateInterviewAnswer === 'function') {
       console.log('\nEVALUATE test')
-      const e = await gemini.evaluateInterviewAnswer('Tell me about yourself', 'I am a software engineer', 'hr')
+      const e = await groq.evaluateInterviewAnswer('Tell me about yourself', 'I am a software engineer', 'hr')
       console.log(JSON.stringify(e, null, 2))
     } else {
-      console.log('evaluateInterviewAnswer not exported from lib/gemini')
+      console.log('evaluateInterviewAnswer not exported from lib/groq')
     }
   } catch (err) {
     console.error('Test runner failed:', err)

@@ -1,4 +1,4 @@
-const { transcribeAudio, evaluateInterviewAnswer } = require('../lib/gemini')
+const { transcribeAudio, evaluateInterviewAnswer } = require('../lib/groq')
 
 async function run() {
   try {

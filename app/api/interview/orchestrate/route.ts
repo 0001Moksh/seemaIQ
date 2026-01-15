@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError, switchGeminiApiKey } from "@/lib/gemini"
+import { generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError, switchGroqApiKey } from "@/lib/groq"
 import { getDatabase } from "@/lib/db"
 import { ObjectId } from "mongodb"
 
@@ -100,14 +100,14 @@ export async function POST(request: Request) {
   } catch (err: any) {
     console.error("Orchestrator error:", err)
     
-    // Handle Gemini quota exceeded (429)
+    // Handle Groq quota exceeded (429)
     if (err instanceof QuotaExceededError) {
       const retryAfter = err.retryAfterSeconds || 60
-      console.warn(`Gemini quota exceeded. Retry after ${retryAfter}s`)
+      console.warn(`Groq quota exceeded. Retry after ${retryAfter}s`)
       return NextResponse.json(
         { 
           error: "API quota exceeded",
-          message: `Gemini API quota exceeded. Please try again in ${retryAfter} seconds.`,
+          message: `Groq API quota exceeded. Please try again in ${retryAfter} seconds.`,
           code: "QUOTA_EXCEEDED",
           retryAfter
         },

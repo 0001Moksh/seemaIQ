@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Resume parsing error:", error)
 
-    // If the underlying error was from Gemini indicating forbidden or leaked key,
+    // If the underlying error was from Groq indicating forbidden or leaked key,
     // return a 503 with a helpful message instead of exposing details.
     const message = (error && (error as any).message) ? (error as any).message : "Failed to parse resume"
     if (message.toLowerCase().includes("forbidden") || message.toLowerCase().includes("api key") || message.toLowerCase().includes("leaked")) {
