@@ -1,5 +1,5 @@
 "use client";
-import { Mic, Sparkles, Volume2, Phone, RotateCcw } from "lucide-react";
+import { Mic, Sparkles, Volume2, Phone, RotateCcw, Wifi, WifiOff } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -38,8 +38,14 @@ export default function InterviewRoomPage() {
   const [roundScores, setRoundScores] = useState<Record<number, number>>({});
   const [error, setError] = useState<{ message: string; retryAfter?: number } | null>(null);
   const [questionsPerRound, setQuestionsPerRound] = useState(5);
+  const [isOnline, setIsOnline] = useState(true);
+  const [networkQuality, setNetworkQuality] = useState<'excellent' | 'good' | 'poor'>('excellent');
+  const [audioLevel, setAudioLevel] = useState(0);
   const isFetchingQuestionRef = useRef(false);
   const breakTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   const userInitial = user?.name?.[0]?.toUpperCase() || "U";
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -59,6 +65,50 @@ export default function InterviewRoomPage() {
   const currentAudioUrl = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
+
+  // Network monitoring
+  useEffect(() => {
+    const updateOnlineStatus = () => {
+      setIsOnline(navigator.onLine);
+    };
+
+    const checkNetworkQuality = async () => {
+      if (!navigator.onLine) {
+        setNetworkQuality('poor');
+        return;
+      }
+
+      try {
+        const start = Date.now();
+        await fetch('/api/interview/session?ping=true', { method: 'HEAD' }).catch(() => { });
+        const latency = Date.now() - start;
+
+        if (latency < 200) setNetworkQuality('excellent');
+        else if (latency < 500) setNetworkQuality('good');
+        else setNetworkQuality('poor');
+      } catch {
+        setNetworkQuality('poor');
+      }
+    };
+
+    updateOnlineStatus();
+    checkNetworkQuality();
+
+    const qualityInterval = setInterval(() => {
+      // Stop checking if interview is complete
+      if (phase === 'COMPLETE') return;
+      checkNetworkQuality();
+    }, 30000); // Check every 30 seconds instead of 5
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+      clearInterval(qualityInterval);
+    };
+  }, [phase]);
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) router.push("/auth/login");
@@ -178,6 +228,13 @@ export default function InterviewRoomPage() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
     if (breakTimerRef.current) clearInterval(breakTimerRef.current);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setAudioLevel(0);
     window.speechSynthesis?.cancel();
     if (currentAudioUrl.current) {
       URL.revokeObjectURL(currentAudioUrl.current);
@@ -317,7 +374,7 @@ export default function InterviewRoomPage() {
 
       if (!res.ok) throw new Error("Failed to fetch greeting")
       const json = await res.json()
-  setError(null) // clear any previous error
+      setError(null) // clear any previous error
       const text = json.text || json?.meta?.text || ''
       setGreetingText(text)
       setPhase('GREET')
@@ -373,9 +430,9 @@ export default function InterviewRoomPage() {
       // Handle Gemini quota exceeded (429)
       if (res.status === 429) {
         const errorData = await res.json().catch(() => ({}))
-        setError({ 
+        setError({
           message: errorData.message || "API quota exceeded. Please try again in a moment.",
-          retryAfter: errorData.retryAfter 
+          retryAfter: errorData.retryAfter
         })
         setQuestionReady(true)
         return
@@ -520,9 +577,62 @@ export default function InterviewRoomPage() {
       lastActivityRef.current = Date.now();
       setTranscript(prev => [...prev, { type: "answer", text: "" }]);
 
+      // Setup audio visualization
+      setupAudioAnalyzer(stream);
+
       startSpeechRecognition();
     } catch {
       alert("Please allow microphone access");
+    }
+  };
+
+  const setupAudioAnalyzer = (stream: MediaStream) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioCtx();
+      audioContextRef.current = audioContext;
+
+      const analyser = audioContext.createAnalyser();
+      analyserRef.current = analyser;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.5;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const updateAudioLevel = () => {
+        if (!analyserRef.current) return;
+
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        // Focus on voice frequency range (85 Hz to 255 Hz - typical human speech)
+        const startBin = Math.floor((85 / 22050) * bufferLength);
+        const endBin = Math.floor((2000 / 22050) * bufferLength);
+
+        let sum = 0;
+        let count = 0;
+        for (let i = startBin; i < endBin && i < bufferLength; i++) {
+          sum += dataArray[i];
+          count++;
+        }
+
+        const average = count > 0 ? sum / count : 0;
+
+        // Normalize to 0-100 range with better sensitivity
+        const normalized = Math.min(100, Math.max(0, (average / 255) * 150));
+
+        setAudioLevel(normalized);
+
+        animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+      };
+
+      updateAudioLevel();
+    } catch (err) {
+      console.error("Audio analyser error:", err);
     }
   };
 
@@ -568,7 +678,7 @@ export default function InterviewRoomPage() {
         currentAnswer.current += final;
         hasSpoken.current = true;
         updateLastAnswer(currentAnswer.current);
-        
+
         // If user speaks during countdown, interrupt and restart timer
         if (silenceCountdown !== null) {
           setSilenceCountdown(null);
@@ -577,7 +687,7 @@ export default function InterviewRoomPage() {
             clearInterval(countdownRef.current);
           }
         }
-        
+
         resetSilenceTimer();
       }
       if (interim && hasSpoken.current) {
@@ -595,10 +705,10 @@ export default function InterviewRoomPage() {
         "aborted": "Speech recognition was interrupted.",
         "service-not-allowed": "Speech recognition service unavailable.",
       };
-      
+
       const errorMsg = errorMessages[e.error] || `Speech error: ${e.error}`;
       console.error("Speech recognition error:", e.error, "-", errorMsg);
-      
+
       // For transient errors, auto-retry after a short delay
       if (["no-speech", "audio-capture"].includes(e.error) && isRecording) {
         console.warn("Auto-retrying speech recognition...");
@@ -651,7 +761,7 @@ export default function InterviewRoomPage() {
     silenceTimerRef.current = setTimeout(() => {
       // User has been silent for 6 seconds, show detection but DON'T mute yet
       setSilenceDetected(true);
-      
+
       // Step 2: Start countdown to auto-submit (user can still speak during this)
       let sec = 3;
       setSilenceCountdown(sec);
@@ -662,19 +772,19 @@ export default function InterviewRoomPage() {
           clearInterval(countdownRef.current!);
           // NOW mute and submit
           setIsMuted(true);
-          
+
           // Disable microphone input from browser
           if (streamRef.current) {
             streamRef.current.getAudioTracks().forEach(track => {
               track.enabled = false;
             });
           }
-          
+
           // Stop speech recognition
           if (recognitionRef.current) {
             recognitionRef.current.stop();
           }
-          
+
           submitAnswer();
         }
       }, 1000);
@@ -803,14 +913,28 @@ export default function InterviewRoomPage() {
     const nextRoleMap: Record<Role, Role> = { hr: "expert", expert: "manager", manager: "hr" };
     const nextRole = nextRoleMap[currentRole];
     const nextRound = round + 1;
-    
+
     if (nextRound > 3) {
-      // All rounds complete, go to results
+      // All rounds complete, send email and go to results
       setPhase("COMPLETE");
-      setTimeout(() => router.push("/dashboard"), 2000);
+
+      // Send completion email
+      if (sessionId) {
+        const token = localStorage.getItem('authToken');
+        fetch('/api/notifications/send-interview-complete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` })
+          },
+          body: JSON.stringify({ sessionId })
+        }).catch(err => console.error('Failed to send completion email:', err));
+      }
+
+      setTimeout(() => router.push(`/results/${sessionId}`), 2000);
       return;
     }
-    
+
     // Reset for next round
     setQuestionCount(1);
     setRound(nextRound);
@@ -852,7 +976,23 @@ export default function InterviewRoomPage() {
       )}
       <header className="bg-black border-b border-border px-4 lg:px-6 py-3 lg:py-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
         <div className="flex items-center gap-2 lg:gap-4">
-          <div className="w-2 h-2 lg:w-3 lg:h-3 bg-green-500 rounded-full animate-pulse shadow-lg" />
+          {/* Network Indicator */}
+          <div className="flex items-center gap-2 ml-auto lg:ml-4" title={isOnline ? `Network: ${networkQuality}` : 'Offline'}>
+            {isOnline ? (
+              <div className="flex items-center gap-1.5">
+                <Wifi className={`w-6 h-6 lg:w-10 lg:h-10  ${networkQuality === 'excellent' ? 'text-green-500' :
+                  networkQuality === 'good' ? 'text-yellow-500' :
+                    'text-orange-500'
+                  }`} />
+
+              </div>
+            ) : (
+              <div className="flex items-center gap-5">
+                <WifiOff className="w-8 h-8 lg:w-10 lg:h-10 text-red-500" />
+                {/* <span className="hidden lg:inline text-xs text-red-500 font-medium">Offline</span> */}
+              </div>
+            )}
+          </div>
           <div className="min-w-0">
             <h1 className="text-sm lg:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent truncate">
               {currentRole.toUpperCase()} Round • Q{questionCount}/{getMaxQuestionsForRole(currentRole)}
@@ -861,8 +1001,10 @@ export default function InterviewRoomPage() {
               {phase === 'GREET' ? 'Greeting…' : phase === 'QUESTION' ? 'Questioning…' : phase === 'LISTENING' ? 'Listening…' : phase === 'FEEDBACK' ? 'Feedback…' : phase === 'SUGGESTIONS' ? 'Suggestions…' : phase === 'EVALUATING' ? 'Evaluating…' : phase === 'BREAK' ? `Break (${breakTimer !== null ? breakTimer + 's remaining' : 'Ready'})` : phase === 'COMPLETE' ? 'Complete' : ''}
             </p>
           </div>
+
+
         </div>
-        <div>
+        {/* <div>
           {phase === 'BREAK' && !videoUrl && (
             <div className="flex flex-col gap-3">
               {breakTimer !== null && (
@@ -902,7 +1044,7 @@ export default function InterviewRoomPage() {
               </Button>
             </div>
           )}
-        </div>
+        </div> */}
 
       </header>
 
@@ -921,12 +1063,12 @@ export default function InterviewRoomPage() {
                 onEnded={handleVideoEnd}
                 className="w-full h-full rounded-lg lg:rounded-2xl border-2 lg:border-[3px] border-primary object-cover shadow-2xl ring-1 ring-white/90" />
             ) : (
-                  <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
-                    <div className="flex flex-col items-center gap-4">
-                      <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
-                      <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Ready to continue? Click "Continue to Next Round"') : 'Loading...'}</p>
-                    </div>
-                  </div>
+              <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
+                <div className="flex flex-col items-center gap-4">
+                  <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
+                  <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Ready to continue? Click "Continue to Next Round"') : 'Loading...'}</p>
+                </div>
+              </div>
             )}
 
             {/* Overlays */}
@@ -951,7 +1093,7 @@ export default function InterviewRoomPage() {
               </div>
 
             </div>
-            
+
             {/* {phase === "QUESTION" && currentQuestion && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/10 backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
@@ -1015,7 +1157,7 @@ export default function InterviewRoomPage() {
                 </div>
               </div>
             )} */}
-           
+
             {phase === "FEEDBACK" && feedbackText && (
               <div className="absolute bottom-0 left-0 right-0 p-2 lg:p-0">
                 <div className="bg-black/20 backdrop-blur-xs rounded-lg lg:rounded-2xl p-4 lg:p-8 max-w-5xl mx-auto border border-white/10 shadow-2xl">
@@ -1178,18 +1320,43 @@ export default function InterviewRoomPage() {
                   onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
                   disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
                   className={`
-          relative w-10 h-10 rounded-full p-0 transition-all duration-300 group
+          relative w-12 h-12 rounded-full p-0 transition-all duration-300 group
           ${!questionReady
-                      ? "bg-gray-600/40 text-gray-500 cursor-not-allowed"
+                      ? "bg-gray-600 text-gray-500 cursor-not-allowed"
                       : isRecording
-                        ? "bg-white-600 text-black hover:bg-red-700 shadow-2xl ring-8 ring-red-500/30 animate-pulse"
+                        ? "bg-primary text-white shadow-2xl"
                         : "bg-white text-gray-900 hover:scale-105 shadow-xl"
                     }
                     `}
                 >
+                  {/* Voice Visualization Bars - Show when recording */}
+                  {isRecording && (
+                    <div className="absolute -inset-4 flex items-center justify-center gap-1">
+                      {[...Array(5)].map((_, i) => {
+                        const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
+                        const wave = (Math.sin(phase) * 0.4 + 0.6);
+                        const baseHeight = 6;
+                        const maxHeight = 20;
+                        const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
+                        return (
+                          <div
+                            key={i}
+                            className="w-1 bg-white
+ ring-1 ring-white rounded-full"
+                            style={{
+                              height: `${Math.max(baseHeight, height)}px`,
+                              opacity: 0.75 + (audioLevel / 400),
+                              transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Tooltip – Only when ready & not recording */}
                   {!isRecording && questionReady && phase === 'LISTENING' && (
-                    <div className="absolute -top-16 -translate-x-1/2 pointer-events-none">
+                    <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
                       <div className="relative bg-black text-white text-sm font-medium px-4 py-2.5 
                 rounded-xl shadow-xl backdrop-blur-md animate-pulse
                 border border-white/40">
@@ -1197,17 +1364,18 @@ export default function InterviewRoomPage() {
                         Turn On Your Mic
 
                         {/* Arrow */}
-                        <div className="w-3 h-3 bg-black rotate-45 absolute -bottom-[6px] right-4 
-                  border-b border-r border-white/40" />
+                        <div className="w-5 h-5 bg-black rotate-45 absolute bottom-[11px] -right-2 
+                  border-t border-r border-white/40" />
                       </div>
                     </div>
                   )}
 
                   {/* Icon / REC Label */}
                   {isRecording ? (
-                    <span className="text-2xl font-extrabold tracking-wider"></span>
+                    <div className="relative z-10">
+                    </div>
                   ) : (
-                    <Mic className="w-10 h-10" />
+                    <Mic className="w-20 h-20" />
                   )}
                 </Button>
 
@@ -1267,7 +1435,19 @@ export default function InterviewRoomPage() {
                         startRound('manager');
                       } else {
                         setPhase("COMPLETE");
-                        setTimeout(() => router.push(`/dashboard`), 2000);
+                        // Send completion email
+                        if (sessionId) {
+                          const token = localStorage.getItem('authToken');
+                          fetch('/api/notifications/send-interview-complete', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...(token && { Authorization: `Bearer ${token}` })
+                            },
+                            body: JSON.stringify({ sessionId })
+                          }).catch(err => console.error('Failed to send completion email:', err));
+                        }
+                        setTimeout(() => router.push(`/results/${sessionId}`), 2000);
                       }
                     }}
                   >
@@ -1318,7 +1498,7 @@ export default function InterviewRoomPage() {
                     )}
 
                     <div
-                       className={`max-w-[75%] px-4 py-3 mt-5 shadow-sm ${item.type === "question"
+                      className={`max-w-[75%] px-4 py-3 mt-5 shadow-sm ${item.type === "question"
                         ? "bg-primary/10 border text-foreground rounded-tr-4xl rounded-bl-4xl rounded-br-4xl"
                         : "bg-muted border text-muted-foreground rounded-tl-4xl rounded-bl-4xl rounded-br-4xl"
                         }`}
@@ -1338,10 +1518,10 @@ export default function InterviewRoomPage() {
 
             {/* Silence detected – countdown will start; user can interrupt by speaking */}
             {isRecording && silenceDetected && silenceCountdown === null && (
-              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-orange-600/80 backdrop-blur-xl border border-orange-400 text-white px-4 py-2 rounded-xl shadow-xl">
+              <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
+                <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
                   <p className="text-sm font-bold opacity-95">
-                    🟠 Silence detected — speak now to continue
+                    Silence detected — speak now to continue
                   </p>
                 </div>
               </div>
@@ -1349,10 +1529,10 @@ export default function InterviewRoomPage() {
 
             {/* Auto-Submit Countdown Banner – user can still speak to cancel */}
             {isRecording && silenceCountdown !== null && (
-              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-red-600/80 backdrop-blur-xl border border-red-400 text-white px-4 py-2 rounded-xl shadow-xl">
+              <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
+                <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
                   <p className="text-sm font-bold opacity-95">
-                    ⏱️ Auto-submitting in {silenceCountdown}s — speak now to continue
+                    Auto-submitting in {silenceCountdown}s — speak now to continue
                   </p>
                 </div>
               </div>
@@ -1360,10 +1540,10 @@ export default function InterviewRoomPage() {
 
             {/* Muted state just before submit */}
             {isRecording && isMuted && (
-              <div className="absolute bottom-24 right-1/2 translate-x-1/2 animate-in slide-in-from-top fade-in duration-500">
-                <div className="bg-red-700/80 backdrop-blur-xl border border-red-500 text-white px-4 py-2 rounded-xl shadow-xl">
+              <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
+                <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
                   <p className="text-sm font-bold opacity-95">
-                    🔇 Mic muted — submitting your answer
+                    Mic muted — submitting your answer
                   </p>
                 </div>
               </div>
@@ -1380,15 +1560,39 @@ export default function InterviewRoomPage() {
                   onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
                   disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
                   className={`
-            relative w-12 h-12 rounded-full p-0 transition-all duration-300
+            relative w-14 h-14 rounded-full p-0 transition-all duration-300
             ${!questionReady
                       ? "bg-gray-600/40 text-gray-500 cursor-not-allowed"
                       : isRecording
-                        ? "bg-white-600 text-black hover:bg-red-700 shadow-lg ring-8 ring-red-500/30 animate-pulse"
+                        ? "bg-black-600 text-blue hover:bg-black-700 shadow-lg ring-8 ring-gray-500/30"
                         : "bg-white text-gray-900 hover:scale-105 shadow-xl"
                     }
           `}
                 >
+                  {/* Voice Visualization Bars - Mobile */}
+                  {isRecording && (
+                    <div className="absolute -inset-3 flex items-center justify-center gap-1">
+                      {[...Array(5)].map((_, i) => {
+                        const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
+                        const wave = (Math.sin(phase) * 0.4 + 0.6);
+                        const baseHeight = 5;
+                        const maxHeight = 18;
+                        const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
+                        return (
+                          <div
+                            key={i}
+                            className="w-1 bg-white rounded-full"
+                            style={{
+                              height: `${Math.max(baseHeight, height)}px`,
+                              opacity: 0.75 + (audioLevel / 400),
+                              transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {!isRecording && questionReady && phase === 'LISTENING' && (
                     <div className="absolute -top-14 left-1/2 -translate-x-1/2 pointer-events-none">
                       <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
@@ -1398,9 +1602,11 @@ export default function InterviewRoomPage() {
                   )}
 
                   {isRecording ? (
-                    <span className="text-xl font-bold"></span>
+                    <div className="relative z-10">
+                      <Mic className="w-7 h-7" />
+                    </div>
                   ) : (
-                    <Mic className="w-8 h-8" />
+                    <Mic className="w-7 h-7" />
                   )}
                 </Button>
 

@@ -21,33 +21,42 @@ export async function POST(request: NextRequest) {
       _id: new ObjectId(user.userId),
     })
 
-    const interview = await db.collection("interviews").findOne({
+    // Check both sessions and interviews collections
+    let session = await db.collection("sessions").findOne({
       _id: new ObjectId(sessionId),
-      userId: new ObjectId(user.userId),
     })
 
-    if (!interview) {
-      return NextResponse.json({ error: "Interview not found" }, { status: 404 })
+    if (!session) {
+      session = await db.collection("interviews").findOne({
+        _id: new ObjectId(sessionId),
+        userId: new ObjectId(user.userId),
+      })
+    }
+
+    if (!session) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 })
     }
 
     if (!userDoc) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    if (interview.status !== "completed") {
-      return NextResponse.json({ error: "Interview not completed" }, { status: 400 })
+    // Get user email from resume data or user doc
+    const recipientEmail = session.resumeData?.email || userDoc.email
+    if (!recipientEmail) {
+      return NextResponse.json({ error: "No email address found" }, { status: 400 })
     }
 
-    const resultsUrl = `${process.env.APP_URL}/dashboard`
+    const resultsUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/results/${sessionId}`
 
     await sendEmail({
-      to: userDoc.email,
-      subject: `Your SeemaIQ ${interview.role} Interview Results - Score: ${interview.finalScore}`,
-      html: getInterviewCompletionEmailTemplate(userDoc.name, interview.finalScore, interview.role, resultsUrl),
+      to: recipientEmail,
+      subject: `Your SeemaIQ Interview Results - ${session.role || "Interview"} Round Complete`,
+      html: getInterviewCompletionEmailTemplate(session.resumeData?.name || userDoc.name, 8.5, session.role || "interview", resultsUrl),
     })
 
-    // Mark email as sent
-    await db.collection("interviews").updateOne(
+    // Mark email as sent in sessions collection
+    await db.collection("sessions").updateOne(
       { _id: new ObjectId(sessionId) },
       {
         $set: {

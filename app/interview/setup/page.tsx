@@ -4,7 +4,8 @@ import type React from "react"
 import { Briefcase, Code2, Users, Sparkles } from "lucide-react";
 import { FileText, X, CheckCircle, Code, Database, Palette, Cloud, Globe } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox"
-import { Upload, User, PenTool } from "lucide-react";
+import { Upload, User, PenTool, Plus, Minus } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils"; // assuming you have a cn() utility
 import { useState, useEffect } from "react"
 import Link from "next/link"
@@ -38,6 +39,7 @@ export default function InterviewSetupPage() {
   const [domain, setDomain] = useState<string>("")
   const [domainTouched, setDomainTouched] = useState(false)
   const [questionsPerRound, setQuestionsPerRound] = useState(5)
+  const totalQuestions = questionsPerRound * 3
   const domains = [
     {
       id: "software",
@@ -97,6 +99,7 @@ export default function InterviewSetupPage() {
   const [noResumeSkillInput, setNoResumeSkillInput] = useState("")
   const [noResumeProjects, setNoResumeProjects] = useState<Array<{ name: string; description: string }>>([])
   const [noResumeExperience, setNoResumeExperience] = useState<Array<{ company: string; title: string; duration: string }>>([])
+  const [isResumeExpanded, setIsResumeExpanded] = useState(false)
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
@@ -653,9 +656,9 @@ export default function InterviewSetupPage() {
               <h2 className="text-3xl pt-6 font-semibold text-center mb-8">Number of Questions Per Round</h2>
               <hr className="flex-grow p-1 border-white/50" />
               <div className="max-w-md mx-auto space-y-4">
-                <p className="text-center text-muted-foreground mb-4">
+                {/* <p className="text-center text-muted-foreground mb-4">
                   Select how many questions you want to answer in each interview round
-                </p>
+                </p> */}
                 <div className="grid grid-cols-3 gap-3">
                   {[3, 5, 7].map((num) => (
                     <button
@@ -671,7 +674,7 @@ export default function InterviewSetupPage() {
                     </button>
                   ))}
                 </div>
-                <div className="pt-4">
+                {/* <div className="pt-4">
                   <label className="block text-sm font-medium text-muted-foreground mb-2">Custom number:</label>
                   <div className="flex gap-2 items-center">
                     <Input
@@ -688,7 +691,33 @@ export default function InterviewSetupPage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">Range: 1 - 15 questions per round</p>
-                </div>
+                </div> */}
+                
+                {/* Interview Structure Summary */}
+                {/* <div className="mt-6 p-4 rounded-lg border border-primary/30 bg-primary/5">
+                  <h3 className="font-semibold text-center mb-3 text-lg">Interview Structure</h3>
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div className="text-center p-3 rounded-lg bg-background/50">
+                      <p className="text-xs text-muted-foreground mb-1">Round 1</p>
+                      <p className="font-bold text-primary">HR</p>
+                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
+                    </div>
+                    <div className="text-center p-3 rounded-lg bg-background/50">
+                      <p className="text-xs text-muted-foreground mb-1">Round 2</p>
+                      <p className="font-bold text-primary">Expert</p>
+                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
+                    </div>
+                    <div className="text-center p-3 rounded-lg bg-background/50">
+                      <p className="text-xs text-muted-foreground mb-1">Round 3</p>
+                      <p className="font-bold text-primary">Manager</p>
+                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
+                    </div>
+                  </div>
+                  <div className="text-center pt-2 border-t border-border">
+                    <p className="text-sm font-semibold">Total: {totalQuestions} questions across 3 rounds</p>
+                    <p className="text-xs text-muted-foreground mt-1">Each round has equal number of questions</p>
+                  </div>
+                </div> */}
               </div>
             </section>
             <div className="space-y-6">
@@ -995,8 +1024,31 @@ export default function InterviewSetupPage() {
 
             {/* Resume Data Display & Edit */}
             {showResumeSummary && resumeData && (
-              <div className="space-y-10 border-t pt-10 animate-fadeIn">
-                <h2 className="text-4xl font-semibold">Resume Information</h2>
+              <div className="space-y-6 border-t pt-6 animate-fadeIn">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-semibold">Resume Information</h2>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsResumeExpanded(!isResumeExpanded)}
+                    className="flex items-center gap-2"
+                  >
+                    {isResumeExpanded ? (
+                      <>
+                        <span>Collapse</span>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      </>
+                    ) : (
+                      <>
+                        <span>View Full Resume</span>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </>
+                    )}
+                  </Button>
+                </div>
 
                 {(!resumeData.name || !resumeData.email) && (
                   <div className="p-3 rounded bg-yellow-50 border border-yellow-200">
@@ -1004,218 +1056,245 @@ export default function InterviewSetupPage() {
                   </div>
                 )}
 
-                {/* Personal Info */}
-                <div className="border p-6 rounded-lg">
-                  <div className="grid md:grid-cols-2 gap-6">
+                {/* Always Visible: Personal Info Summary */}
+                <div className="border p-4 rounded-lg bg-secondary/30">
+                  <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="font-medium text-foreground">Name</label>
-                      <Input value={resumeData.name || ""} disabled className="mt-2 bg-muted" />
+                      <label className="font-medium text-sm text-muted-foreground">Name</label>
+                      <p className="text-base font-semibold mt-1">{resumeData.name || "Not provided"}</p>
                     </div>
-
                     <div>
-                      <label className="font-medium text-foreground">Email</label>
-                      <Input
-                        type="email"
-                        value={resumeData.email || ""}
-                        onChange={(e) => updateResumeData("email", e.target.value.slice(0, 100))}
-                        maxLength={100}
-                        className="mt-2"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">{resumeData.email.length}/100</p>
+                      <label className="font-medium text-sm text-muted-foreground">Email</label>
+                      <p className="text-base font-semibold mt-1">{resumeData.email || "Not provided"}</p>
                     </div>
-
                     <div>
-                      <label className="font-medium text-foreground">Phone Number</label>
-                      <Input
-                        value={resumeData.phone || ""}
-                        onChange={(e) => updateResumeData("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        maxLength={10}
-                        placeholder="eg: 987654XXX"
-                        className="mt-2"
-                      />
+                      <label className="font-medium text-sm text-muted-foreground">Phone</label>
+                      <p className="text-base font-semibold mt-1">{resumeData.phone || "Not provided"}</p>
+                    </div>
+                    <div>
+                      <label className="font-medium text-sm text-muted-foreground">Skills</label>
+                      <p className="text-base font-semibold mt-1">{resumeData.skills?.length || 0} skill(s)</p>
                     </div>
                   </div>
                 </div>
 
+                {/* Expandable Section: Full Resume Details */}
+                {isResumeExpanded && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-300">
+                    {/* Personal Info - Editable */}
+                    <div className="border p-6 rounded-lg">
+                      <h3 className="text-lg font-semibold mb-4">Personal Information</h3>
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="font-medium text-foreground">Name</label>
+                          <Input value={resumeData.name || ""} disabled className="mt-2 bg-muted" />
+                        </div>
 
-                {/* Summary */}
-                <div>
-                  <label className="text-xl font-medium text-foreground">Professional Summary</label>
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>Max 500 characters</span>
-                    <span>{resumeData.summary.length}/500</span>
-                  </div>
-                  <textarea
-                    value={resumeData.summary || ""}
-                    onChange={(e) => updateResumeData("summary", e.target.value.slice(0, 500))}
-                    maxLength={500}
-                    className="w-full mt-2 p-4 rounded-xl border bg-secondary focus:ring-2 focus:ring-primary/40 transition"
-                    rows={4}
-                  />
-                </div>
-
-                {/* Skills */}
-                <div>
-                  <label className="text-xl font-medium text-foreground">Skills</label>
-
-                  <Input
-                    placeholder="Add skill and press Enter"
-                    maxLength={50}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const input = e.currentTarget
-                        if (input.value.trim() && resumeData.skills.length < 100) {
-                          updateResumeData("skills", [...resumeData.skills, input.value.trim()])
-                          input.value = ""
-                        }
-                      }
-                    }}
-                    className="mt-3 border-border"
-                  />
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    {resumeData.skills.map((skill, i) => (
-                      <div
-                        key={i}
-                        className="px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-sm flex items-center gap-2"
-                      >
-                        {skill}
-
-                        {/* Modern round remove button */}
-                        <button
-                          onClick={() =>
-                            updateResumeData(
-                              "skills",
-                              resumeData.skills.filter((_, idx) => idx !== i),
-                            )
-                          }
-                          className="w-5 h-5 flex items-center justify-center rounded-full bg-destructive/10 hover:bg-destructive/40 transition"
-                        >
-                          <span className="text-xs">×</span>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                </div>
-
-                {/* Experience */}
-                <div>
-                  <div className="flex items-center justify-between pt-4 mb-4">
-                    <label className="text-xl font-medium text-foreground block">Experience</label>
-                    <Button className="border px-4" variant="ghost" onClick={addResumeExperience}>Add Experience</Button>
-                  </div>
-                  <div className="space-y-4">
-                    {resumeData.experience.map((exp, i) => (
-                      <Card key={i} className="p-5 border border-border rounded-xl shadow-sm space-y-3 relative">
-
-                        <button
-                          onClick={() =>
-                            updateResumeData(
-                              "experience",
-                              resumeData.experience.filter((_, idx) => idx !== i),
-                            )
-                          }
-                          className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-destructive/20 hover:bg-destructive/40 transition"
-                        >
-                          <span className="text-lg font-bold text-destructive">×</span>
-                        </button>
-
-                        <div className="grid md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="font-medium text-foreground">Email</label>
                           <Input
-                            className="w-50"
-                            placeholder="Company Name..."
-                            value={exp.company || ""}
-                            onChange={(e) => {
-                              const updated = [...resumeData.experience]
-                              updated[i].company = e.target.value.slice(0, 100)
-                              updateResumeData("experience", updated)
-                            }}
+                            type="email"
+                            value={resumeData.email || ""}
+                            onChange={(e) => updateResumeData("email", e.target.value.slice(0, 100))}
                             maxLength={100}
+                            className="mt-2"
                           />
-                          <Input
-                            className="border-border"
-                            placeholder="Job Title (e.g. Software Engineer)"
-                            value={exp.title || ""}
-                            onChange={(e) => {
-                              const updated = [...resumeData.experience]
-                              updated[i].title = e.target.value.slice(0, 100)
-                              updateResumeData("experience", updated)
-                            }}
-                            maxLength={100}
-                          />
+                          <p className="text-xs text-muted-foreground mt-1">{resumeData.email.length}/100</p>
+                        </div>
 
+                        <div>
+                          <label className="font-medium text-foreground">Phone Number</label>
                           <Input
-                            className="w-70"
-                            placeholder="Duration..."
-                            value={exp.duration || ""}
-                            onChange={(e) => {
-                              const updated = [...resumeData.experience]
-                              updated[i].duration = e.target.value.slice(0, 50)
-                              updateResumeData("experience", updated)
-                            }}
-                            maxLength={50}
+                            value={resumeData.phone || ""}
+                            onChange={(e) => updateResumeData("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                            maxLength={10}
+                            placeholder="eg: 987654XXX"
+                            className="mt-2"
                           />
                         </div>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-                {/* Projects */}
-                <div>
-                  <div className="flex items-center justify-between pt-4 mb-4">
-                    <label className="text-xl font-semibold text-foreground">
-                      Projects
-                    </label>
+                      </div>
+                    </div>
 
-                    <Button variant="ghost" onClick={addResumeProject} className="border px-4">
-                      Add Project
-                    </Button>
-                  </div>
-                  <div className="space-y-4">
-                    {resumeData.projects.map((proj, i) => (
-                      <Card key={i} className="p-3 border border-border rounded-xl shadow-sm relative">
+                    {/* Summary */}
+                    <div>
+                      <label className="text-xl font-medium text-foreground">Professional Summary</label>
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>Max 500 characters</span>
+                        <span>{resumeData.summary.length}/500</span>
+                      </div>
+                      <textarea
+                        value={resumeData.summary || ""}
+                        onChange={(e) => updateResumeData("summary", e.target.value.slice(0, 500))}
+                        maxLength={500}
+                        className="w-full mt-2 p-4 rounded-xl border bg-secondary focus:ring-2 focus:ring-primary/40 transition"
+                        rows={4}
+                      />
+                    </div>
 
-                        {/* Round delete icon */}
-                        <button
-                          onClick={() =>
-                            updateResumeData(
-                              "projects",
-                              resumeData.projects.filter((_, idx) => idx !== i),
-                            )
+                    {/* Skills */}
+                    <div>
+                      <label className="text-xl font-medium text-foreground">Skills</label>
+
+                      <Input
+                        placeholder="Add skill and press Enter"
+                        maxLength={50}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const input = e.currentTarget
+                            if (input.value.trim() && resumeData.skills.length < 100) {
+                              updateResumeData("skills", [...resumeData.skills, input.value.trim()])
+                              input.value = ""
+                            }
                           }
-                          className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-destructive/20 hover:bg-destructive/40 transition"
-                        >
-                          <span className="text-lg font-bold text-destructive">×</span>
-                        </button>
-                        <Input
-                          className="w-72 !text-lg mt-4"
-                          placeholder="Project Name (max 20)"
-                          value={proj.name || ""}
-                          onChange={(e) => {
-                            const updated = [...resumeData.projects]
-                            updated[i].name = e.target.value.slice(0, 20)
-                            updateResumeData("projects", updated)
-                          }}
-                          maxLength={20}
-                        />
-                        <p className="text-xs text-right text-muted-foreground">{proj.description.length}/200</p>
+                        }}
+                        className="mt-3 border-border"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        {resumeData.skills.map((skill, i) => (
+                          <div
+                            key={i}
+                            className="px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-sm flex items-center gap-2"
+                          >
+                            {skill}
 
-                        <textarea
-                          placeholder="Project Description (max 200 chars)"
-                          value={proj.description || ""}
-                          onChange={(e) => {
-                            const updated = [...resumeData.projects]
-                            updated[i].description = e.target.value.slice(0, 200)
-                            updateResumeData("projects", updated)
-                          }}
-                          maxLength={200}
-                          className="w-full p-3 rounded-lg border bg-secondary text-sm"
-                          rows={3}
-                        />
-                      </Card>
-                    ))}
+                            {/* Modern round remove button */}
+                            <button
+                              onClick={() =>
+                                updateResumeData(
+                                  "skills",
+                                  resumeData.skills.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className="w-5 h-5 flex items-center justify-center rounded-full bg-destructive/10 hover:bg-destructive/40 transition"
+                            >
+                              <span className="text-xs">×</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Experience */}
+                    <div>
+                      <div className="flex items-center justify-between pt-4 mb-4">
+                        <label className="text-xl font-medium text-foreground block">Experience</label>
+                        <Button className="border px-4" variant="ghost" onClick={addResumeExperience}>Add Experience</Button>
+                      </div>
+                      <div className="space-y-4">
+                        {resumeData.experience.map((exp, i) => (
+                          <Card key={i} className="p-5 border border-border rounded-xl shadow-sm space-y-3 relative">
+
+                            <button
+                              onClick={() =>
+                                updateResumeData(
+                                  "experience",
+                                  resumeData.experience.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-destructive/20 hover:bg-destructive/40 transition"
+                            >
+                              <span className="text-lg font-bold text-destructive">×</span>
+                            </button>
+
+                            <div className="grid md:grid-cols-3 gap-4">
+                              <Input
+                                className="w-50"
+                                placeholder="Company Name..."
+                                value={exp.company || ""}
+                                onChange={(e) => {
+                                  const updated = [...resumeData.experience]
+                                  updated[i].company = e.target.value.slice(0, 100)
+                                  updateResumeData("experience", updated)
+                                }}
+                                maxLength={100}
+                              />
+                              <Input
+                                className="border-border"
+                                placeholder="Job Title (e.g. Software Engineer)"
+                                value={exp.title || ""}
+                                onChange={(e) => {
+                                  const updated = [...resumeData.experience]
+                                  updated[i].title = e.target.value.slice(0, 100)
+                                  updateResumeData("experience", updated)
+                                }}
+                                maxLength={100}
+                              />
+
+                              <Input
+                                className="w-70"
+                                placeholder="Duration..."
+                                value={exp.duration || ""}
+                                onChange={(e) => {
+                                  const updated = [...resumeData.experience]
+                                  updated[i].duration = e.target.value.slice(0, 50)
+                                  updateResumeData("experience", updated)
+                                }}
+                                maxLength={50}
+                              />
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Projects */}
+                    <div>
+                      <div className="flex items-center justify-between pt-4 mb-4">
+                        <label className="text-xl font-semibold text-foreground">
+                          Projects
+                        </label>
+
+                        <Button variant="ghost" onClick={addResumeProject} className="border px-4">
+                          Add Project
+                        </Button>
+                      </div>
+                      <div className="space-y-4">
+                        {resumeData.projects.map((proj, i) => (
+                          <Card key={i} className="p-3 border border-border rounded-xl shadow-sm relative">
+
+                            {/* Round delete icon */}
+                            <button
+                              onClick={() =>
+                                updateResumeData(
+                                  "projects",
+                                  resumeData.projects.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-destructive/20 hover:bg-destructive/40 transition"
+                            >
+                              <span className="text-lg font-bold text-destructive">×</span>
+                            </button>
+                            <Input
+                              className="w-72 !text-lg mt-4"
+                              placeholder="Project Name (max 20)"
+                              value={proj.name || ""}
+                              onChange={(e) => {
+                                const updated = [...resumeData.projects]
+                                updated[i].name = e.target.value.slice(0, 20)
+                                updateResumeData("projects", updated)
+                              }}
+                              maxLength={20}
+                            />
+                            <p className="text-xs text-right text-muted-foreground">{proj.description.length}/200</p>
+
+                            <textarea
+                              placeholder="Project Description (max 200 chars)"
+                              value={proj.description || ""}
+                              onChange={(e) => {
+                                const updated = [...resumeData.projects]
+                                updated[i].description = e.target.value.slice(0, 200)
+                                updateResumeData("projects", updated)
+                              }}
+                              maxLength={200}
+                              className="w-full p-3 rounded-lg border bg-secondary text-sm"
+                              rows={3}
+                            />
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
