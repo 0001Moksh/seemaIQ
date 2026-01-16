@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError, switchGroqApiKey } from "@/lib/groq"
-import { getDatabase } from "@/lib/db"
-import { ObjectId } from "mongodb"
+import { InterviewService } from "@/lib/services/interview.service"
 
 type Role = "hr" | "technical" | "manager"
 
@@ -12,8 +11,15 @@ const normalizeRole = (role: string): Role => {
   return "hr"
 }
 
-async function greetText(role: Role, resumeName?: string) {
+async function greetText(role: Role, resumeName?: string, language: string = 'english') {
   const namestr = resumeName ? resumeName.split(" ")[0] : "there"
+  
+  if (language === 'hindi') {
+    if (role === "hr") return `Namaste ${namestr}, मैं Mira Sharma हूं HR से। इस round में हम communication और workplace behaviour पर focus करेंगे। चलिए शुरू करते हैं।`
+    if (role === "technical") return `Hi ${namestr}, मैं Ashish Yadev हूं, Domain Expert। मैं आपकी technical approach evaluate करूंगा। Ready हैं?`
+    return `Hello ${namestr}, मैं Ryan Bhardwaj हूं, Hiring Manager। यह round leadership और ownership पर focused है।`
+  }
+  
   if (role === "hr") return `Hello ${namestr}, I’m Mira Sharma from HR. In this round, we’ll focus on communication and workplace behaviour. Let’s begin.`
   if (role === "technical") return `Hi ${namestr}, I’m Ashish Yadev, Domain Expert. I’ll evaluate your technical approach. Ready?`
   return `Good to meet you ${namestr}, I’m Ryan Bhardwaj, Hiring Manager. This round focuses on leadership and ownership.`
@@ -32,14 +38,11 @@ export async function handleOrchestrate(body: any) {
   if (action === "greet") {
     const text = await greetText(role, resumeData?.name)
     const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${0}/${questionsPerRound}`, role, status: "greet" }
-    // persist session state if sessionId present
+    
+    // Persist session state using service layer
     if (body.sessionId) {
       try {
-        const db = await getDatabase()
-        await db.collection('sessions').updateOne(
-          { _id: new ObjectId(body.sessionId) },
-          { $set: { status: 'active', role, currentRound: body.round || 1, updatedAt: new Date(), lastMeta: meta } }
-        )
+        await InterviewService.resumeSession(body.sessionId)
       } catch (e) {
         console.warn('Persist greet state failed', e)
       }
@@ -52,13 +55,14 @@ export async function handleOrchestrate(body: any) {
     const q = await generateInterviewQuestion(role === "technical" ? "technical" : role === "hr" ? "hr" : "manager", resumeData?.experience || "mid", round, previousQuestions, resumeData, domain)
     const completedSoFar = Math.max(0, questionNum - 1)
     const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${completedSoFar}/${questionsPerRound}`, role, status: "question" }
+    
     if (body.sessionId) {
       try {
-        const db = await getDatabase()
-        await db.collection('sessions').updateOne(
-          { _id: new ObjectId(body.sessionId) },
-          { $set: { questionIndex: questionNum, updatedAt: new Date(), lastMeta: meta }, $push: { questions: { text: q, round, questionNum, createdAt: new Date() } } }
-        )
+        await InterviewService.addQuestion(body.sessionId, {
+          text: q,
+          round,
+          questionNum,
+        })
       } catch (e) {
         console.warn('Persist question state failed', e)
       }
@@ -75,13 +79,20 @@ export async function handleOrchestrate(body: any) {
     const completedCount = Number(body.completedCount || 0) + 1
     const finished = completedCount >= questionsPerRound
     const meta = { improvement_is, candidate_score, interview_complete: finished, question_complete: `${completedCount}/${questionsPerRound}`, role, status: "conversation" }
+    
     if (body.sessionId) {
       try {
-        const db = await getDatabase()
-        await db.collection('sessions').updateOne(
-          { _id: new ObjectId(body.sessionId) },
-          { $push: { answers: { question, answer, evaluation: evalRes, round, createdAt: new Date() } }, $set: { updatedAt: new Date(), lastMeta: meta, questionIndex: completedCount } }
-        )
+        await InterviewService.addAnswer(body.sessionId, {
+          question,
+          answer,
+          evaluation: evalRes,
+          round,
+        })
+        
+        // Auto-complete session when all questions are answered
+        if (finished) {
+          await InterviewService.completeSession(body.sessionId)
+        }
       } catch (e) {
         console.warn('Persist evaluate state failed', e)
       }
@@ -116,7 +127,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { error: err?.message || "Failed to orchestrate" }, 
+      { 
+        error: err?.message || "Failed to orchestrate",
+        details: process.env.NODE_ENV === "development" ? err?.stack : undefined
+      }, 
       { status: 500 }
     )
   }

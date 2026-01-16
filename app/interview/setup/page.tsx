@@ -100,12 +100,28 @@ export default function InterviewSetupPage() {
   const [noResumeProjects, setNoResumeProjects] = useState<Array<{ name: string; description: string }>>([])
   const [noResumeExperience, setNoResumeExperience] = useState<Array<{ company: string; title: string; duration: string }>>([])
   const [isResumeExpanded, setIsResumeExpanded] = useState(false)
+  const [interviewLanguage, setInterviewLanguage] = useState<'english' | 'hindi'>('english')
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
       router.push("/auth/login")
     }
   }, [isLoading, isLoggedIn, router])
+
+  // Pre-fill manual entry fields from user profile
+  useEffect(() => {
+    if (user && resumeSource === 'manual') {
+      if (!noResumeName && user.name) {
+        setNoResumeName(String(user.name))
+      }
+      if (!noResumeEmail && (user as any).email) {
+        setNoResumeEmail(String((user as any).email))
+      }
+      if (!noResumePhone && (user as any).phone) {
+        setNoResumePhone(String((user as any).phone))
+      }
+    }
+  }, [user, resumeSource, noResumeName, noResumeEmail, noResumePhone])
 
   // When user selects "Use Profile", try to load saved profile and map to resumeData
   useEffect(() => {
@@ -656,9 +672,6 @@ export default function InterviewSetupPage() {
               <h2 className="text-3xl pt-6 font-semibold text-center mb-8">Number of Questions Per Round</h2>
               <hr className="flex-grow p-1 border-white/50" />
               <div className="max-w-md mx-auto space-y-4">
-                {/* <p className="text-center text-muted-foreground mb-4">
-                  Select how many questions you want to answer in each interview round
-                </p> */}
                 <div className="grid grid-cols-3 gap-3">
                   {[3, 5, 7].map((num) => (
                     <button
@@ -674,50 +687,6 @@ export default function InterviewSetupPage() {
                     </button>
                   ))}
                 </div>
-                {/* <div className="pt-4">
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Custom number:</label>
-                  <div className="flex gap-2 items-center">
-                    <Input
-                      type="number"
-                      min="1"
-                      max="15"
-                      value={questionsPerRound}
-                      onChange={(e) => {
-                        const val = Math.max(1, Math.min(15, parseInt(e.target.value) || 3))
-                        setQuestionsPerRound(val)
-                      }}
-                      className="w-full"
-                      placeholder="Enter custom number"
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">Range: 1 - 15 questions per round</p>
-                </div> */}
-                
-                {/* Interview Structure Summary */}
-                {/* <div className="mt-6 p-4 rounded-lg border border-primary/30 bg-primary/5">
-                  <h3 className="font-semibold text-center mb-3 text-lg">Interview Structure</h3>
-                  <div className="grid grid-cols-3 gap-3 mb-3">
-                    <div className="text-center p-3 rounded-lg bg-background/50">
-                      <p className="text-xs text-muted-foreground mb-1">Round 1</p>
-                      <p className="font-bold text-primary">HR</p>
-                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
-                    </div>
-                    <div className="text-center p-3 rounded-lg bg-background/50">
-                      <p className="text-xs text-muted-foreground mb-1">Round 2</p>
-                      <p className="font-bold text-primary">Expert</p>
-                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
-                    </div>
-                    <div className="text-center p-3 rounded-lg bg-background/50">
-                      <p className="text-xs text-muted-foreground mb-1">Round 3</p>
-                      <p className="font-bold text-primary">Manager</p>
-                      <p className="text-xs text-muted-foreground mt-1">{questionsPerRound} questions</p>
-                    </div>
-                  </div>
-                  <div className="text-center pt-2 border-t border-border">
-                    <p className="text-sm font-semibold">Total: {totalQuestions} questions across 3 rounds</p>
-                    <p className="text-xs text-muted-foreground mt-1">Each round has equal number of questions</p>
-                  </div>
-                </div> */}
               </div>
             </section>
             <div className="space-y-6">

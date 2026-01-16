@@ -18,12 +18,34 @@ export async function connectToDatabase() {
 
   const db = client.db("seeamiq")
 
-  // Create indexes
+  // Create indexes for optimal query performance
+  // Users collection indexes
   await db.collection("users").createIndex({ email: 1 }, { unique: true })
+  await db.collection("users").createIndex({ createdAt: -1 })
+
+  // Sessions collection indexes (primary interview data)
+  await db.collection("sessions").createIndex({ userId: 1, createdAt: -1 })
+  await db.collection("sessions").createIndex({ userId: 1, status: 1 })
+  await db.collection("sessions").createIndex({ status: 1, createdAt: -1 })
+  await db.collection("sessions").createIndex({ createdAt: -1 })
+  await db.collection("sessions").createIndex({ updatedAt: -1 })
+  
+  // TTL index for automatic session cleanup (7 days after expiry)
+  await db.collection("sessions").createIndex(
+    { expiresAt: 1 }, 
+    { expireAfterSeconds: 0 }
+  )
+
+  // Interviews collection indexes (if still needed for legacy data)
   await db.collection("interviews").createIndex({ userId: 1, createdAt: -1 })
-  // TTL indexes must be single-field. Create TTL on `expiresAt` and a
-  // separate index on `userId` for lookup performance.
-  await db.collection("sessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+  await db.collection("interviews").createIndex({ status: 1, createdAt: -1 })
+
+  // Auth sessions collection indexes
+  // TTL index on expiresAt for automatic cleanup
+  await db.collection("sessions").createIndex(
+    { expiresAt: 1 }, 
+    { expireAfterSeconds: 0 }
+  )
   await db.collection("sessions").createIndex({ userId: 1 })
 
   cachedClient = client

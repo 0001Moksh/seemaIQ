@@ -1,34 +1,51 @@
 import { NextResponse } from "next/server"
-import { getDatabase } from "@/lib/db"
-import { ObjectId } from "mongodb"
+import { InterviewService } from "@/lib/services/interview.service"
+import { logger } from "@/lib/services/logger.service"
 
+/**
+ * POST /api/interview/session/create
+ * Create a new interview session
+ */
 export async function POST(request: Request) {
+  const startTime = Date.now()
+  
   try {
     const body = await request.json()
     const { userId, resumeData, role = 'hr', experience = 'mid', questionsPerRound = 5 } = body
 
-    const db = await getDatabase()
+    if (!userId) {
+      logger.warn("Session creation failed: Missing userId", { endpoint: "/api/interview/session/create" })
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 })
+    }
 
-    const session = {
-      userId: userId ? new ObjectId(userId) : null,
-      resumeData: resumeData || null,
+    // Use centralized service layer
+    const sessionId = await InterviewService.createSession({
+      userId,
+      resumeData,
       role,
       experience,
       questionsPerRound,
-      currentRound: 1,
-      questionIndex: 0,
-      questions: [],
-      answers: [],
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
-    }
+    })
 
-    const res = await db.collection('sessions').insertOne(session)
-    return NextResponse.json({ success: true, sessionId: res.insertedId.toString() })
+    const duration = Date.now() - startTime
+    logger.info("Session created successfully", { 
+      sessionId, 
+      userId, 
+      role,
+      duration 
+    })
+
+    return NextResponse.json({ success: true, sessionId })
   } catch (err) {
-    console.error('Create session error:', err)
-    return NextResponse.json({ error: 'Failed to create session' }, { status: 500 })
+    const duration = Date.now() - startTime
+    logger.error("Create session error", { duration }, err as Error)
+    
+    return NextResponse.json(
+      { 
+        error: 'Failed to create session',
+        message: process.env.NODE_ENV === "development" ? (err as Error).message : undefined
+      }, 
+      { status: 500 }
+    )
   }
 }

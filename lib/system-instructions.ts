@@ -7,6 +7,7 @@ export interface SystemInstructionContext {
   domain: string
   resumeData?: ResumeData
   experienceLevel: "junior" | "mid" | "senior"
+  language?: "english" | "hindi"
 }
 
 /**
@@ -14,10 +15,14 @@ export interface SystemInstructionContext {
  * This instruction is used for the entire conversation in a round
  */
 export function buildSystemInstruction(context: SystemInstructionContext): string {
-  const { candidateName, role, round, domain, resumeData, experienceLevel } = context
+  const { candidateName, role, round, domain, resumeData, experienceLevel, language = 'english' } = context
 
-  const rolePersonality = getRolePersonality(role)
+  const rolePersonality = getRolePersonality(role, language)
   const resumeContext = resumeData ? `Skills: ${resumeData.skills?.slice(0, 5).join(", ")}` : ""
+
+  const langInstruction = language === 'hindi' 
+    ? `\n\nIMPORTANT: आपको सभी सवाल हिंदी में पूछने हैं। कृपया केवल हिंदी भाषा का उपयोग करें।\nYou MUST ask ALL questions in Hindi language only. Do not use English.`
+    : `\n\nIMPORTANT: Ask ALL questions in English language only.`
 
   return `You are a professional ${role.toUpperCase()} interviewer.
 
@@ -32,10 +37,28 @@ INSTRUCTIONS:
 - NO bullet points, NO markdown, NO formatting
 - Listen to answers and ask follow-ups when needed
 - Be professional and encouraging
-- Only output the question (nothing else)`
+- Only output the question (nothing else)${langInstruction}`
 }
 
-function getRolePersonality(role: "hr" | "technical" | "manager"): string {
+function getRolePersonality(role: "hr" | "technical" | "manager", language: "english" | "hindi" = "english"): string {
+  if (language === "hindi") {
+    const hindiPersonalities: Record<string, string> = {
+      hr: `- आप गर्मजोशी से भरे, मिलनसार और उम्मीदवार के सॉफ्ट स्किल्स, प्रेरणा और कंपनी कल्चर फिट को समझने पर केंद्रित हैं।
+- उनके करियर लक्ष्यों, टीम सहयोग, संघर्ष समाधान और डोमेन के प्रति जुनून के बारे में पूछें।
+- संवाद कौशल, पारस्परिक कौशल और अनुकूलन क्षमता का आकलन करें।
+- पूरी बातचीत में सहानुभूतिपूर्ण और प्रोत्साहित करने वाले रहें।`,
+      technical: `- आप विश्लेषणात्मक, विस्तार-उन्मुख और तकनीकी गहराई तथा समस्या-समाधान पर केंद्रित हैं।
+- उनके तकनीकी प्रोजेक्ट्स, आर्किटेक्चर निर्णयों, कोडिंग प्रथाओं और उन्होंने जो चुनौतियां पार कीं, उनके बारे में पूछें।
+- उनके समस्या-समाधान दृष्टिकोण और समस्याओं को कैसे डीबग करते हैं, इस पर ध्यान दें।
+- सटीक और गहन रहें; सतही उत्तरों से संतुष्ट न हों।`,
+      manager: `- आप रणनीतिक, नेतृत्व-केंद्रित और इस बात में रुचि रखते हैं कि उम्मीदवार टीमों को कैसे मैनेज करते हैं, काम को प्राथमिकता देते हैं और निर्णय लेते हैं।
+- उनके नेतृत्व अनुभव, टीम प्रबंधन, कठिन परिस्थितियों को संभालने और स्केलिंग चुनौतियों के बारे में पूछें।
+- मेंटर करने, प्रतिनिधित्व करने और संघर्ष संभालने की उनकी क्षमता का आकलन करें।
+- अपने सवालों में कार्यकारी-स्तर रहें; प्रभाव और परिणामों पर ध्यान केंद्रित करें।`,
+    }
+    return hindiPersonalities[role] || hindiPersonalities.hr
+  }
+
   const personalities: Record<string, string> = {
     hr: `- You are warm, approachable, and focused on understanding the candidate's soft skills, motivation, and cultural fit.
 - Ask about their career goals, team collaboration, conflict resolution, and passion for the domain.

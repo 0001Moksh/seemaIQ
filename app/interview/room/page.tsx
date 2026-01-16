@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
+import { audioQueue } from "@/lib/audio-queue";
 
 type Phase = "GREET" | "QUESTION" | "LISTENING" | "FEEDBACK" | "SUGGESTIONS" | "EVALUATING" | "BREAK" | "COMPLETE";
 type Role = "hr" | "expert" | "manager";
@@ -218,6 +219,9 @@ export default function InterviewRoomPage() {
   }, []);
 
   const cleanup = () => {
+    // Clear audio queue to stop any pending speech
+    audioQueue.clear();
+    
     if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
     recorderRef.current?.stream?.getTracks().forEach(t => t.stop());
     if (streamRef.current) {
@@ -282,50 +286,44 @@ export default function InterviewRoomPage() {
 
   const speak = async (text: string, role: Role, p?: Phase) => {
     if (!text.trim()) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      try {
-        window.speechSynthesis?.cancel();
-        setIsSpeaking(true);
-        // show interviewer video only while speaking (except during listening)
-        const phaseToUse = p ?? phase;
-        const v = getVideoForPhase(role, phaseToUse)
-        if (v) setVideoUrl(v)
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "en-US";
-        utterance.rate = 1.2;
-        utterance.onend = () => {
-          setIsSpeaking(false);
-          // hide interviewer video after speaking unless we're in LISTENING phase
-          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
-          // mark question ready when a question just finished speaking
-          if (phaseToUse === 'QUESTION') {
-            setQuestionReady(true);
-            setPhase('LISTENING');
-          }
-          resolve();
-        };
-        utterance.onerror = () => {
-          setIsSpeaking(false);
-          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
-          resolve();
-        };
-        window.speechSynthesis.speak(utterance);
-        setTimeout(() => {
-          setIsSpeaking(false);
-          if (phaseToUse !== 'LISTENING') setVideoUrl(null)
-          // ensure questionReady if this was a question
-          if (phaseToUse === 'QUESTION') {
-            setQuestionReady(true);
-            setPhase('LISTENING');
-          }
-          resolve();
-        }, 30000);
-      } catch (err) {
-        setIsSpeaking(false);
-        if ((p ?? phase) !== 'LISTENING') setVideoUrl(null)
-        resolve();
+    
+    try {
+      setIsSpeaking(true);
+      const phaseToUse = p ?? phase;
+      const v = getVideoForPhase(role, phaseToUse);
+      if (v) setVideoUrl(v);
+      
+      // Use audio queue instead of direct speech synthesis to prevent interruptions
+      await audioQueue.speak(text, 'en-US', 1.2);
+      
+      setIsSpeaking(false);
+      
+      // Mark question ready and switch to listening phase when question completes
+      if (phaseToUse === 'QUESTION') {
+        setQuestionReady(true);
+        setPhase('LISTENING');
+        // Activate listening video immediately after question completes
+        const listeningVideo = getVideoForPhase(role, 'LISTENING');
+        if (listeningVideo) setVideoUrl(listeningVideo);
+      } else if (phaseToUse !== 'LISTENING') {
+        // Hide interviewer video after speaking for other phases
+        setVideoUrl(null);
       }
-    });
+    } catch (err) {
+      console.error('Speech error:', err);
+      setIsSpeaking(false);
+      
+      // Ensure question ready even on error
+      if ((p ?? phase) === 'QUESTION') {
+        setQuestionReady(true);
+        setPhase('LISTENING');
+        // Activate listening video even on error
+        const listeningVideo = getVideoForPhase(role, 'LISTENING');
+        if (listeningVideo) setVideoUrl(listeningVideo);
+      } else if ((p ?? phase) !== 'LISTENING') {
+        setVideoUrl(null);
+      }
+    }
   };
 
   const fetchGreeting = async (roleArg?: Role) => {
@@ -1052,18 +1050,38 @@ export default function InterviewRoomPage() {
         <section className="flex-1 relative min-h-96 lg:min-h-full">
 
           <div className="relative h-96 border border-primary/50 lg:h-full bg-black shadow-2xl rounded-lg lg:rounded-2xl overflow-hidden">
+            {/* Background Image - only show when video is playing */}
+            {videoUrl && (
+              <div 
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: `url(/videos/${currentRole}/bg.jpeg)` }}
+              />
+            )}
+            
+            {/* Video Overlay */}
             {videoUrl ? (
               <video
                 key={videoUrl}
                 src={videoUrl}
                 autoPlay
                 muted={true}
-                loop={phase === "LISTENING"}
+                loop
                 playsInline
-                onEnded={handleVideoEnd}
-                className="w-full h-full rounded-lg lg:rounded-2xl border-2 lg:border-[3px] border-primary object-cover shadow-2xl ring-1 ring-white/90" />
+                onError={(e) => {
+                  console.error('Video load error:', videoUrl);
+                  // Retry loading video after 1 second
+                  setTimeout(() => {
+                    if (e.currentTarget) {
+                      e.currentTarget.load();
+                    }
+                  }, 1000);
+                }}
+                onLoadedData={() => {
+                  console.log('Video loaded successfully:', videoUrl);
+                }}
+                className="relative z-10 w-full h-full rounded-lg lg:rounded-2xl border-2 lg:border-[3px] border-primary object-cover shadow-2xl ring-1 ring-white/90 animate-in fade-in duration-500" />
             ) : (
-              <div className="w-full h-full bg-black flex items-center justify-center text-white text-xl">
+              <div className="relative z-10 w-full h-full flex items-center justify-center text-white text-xl animate-in fade-in duration-300">
                 <div className="flex flex-col items-center gap-4">
                   <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
                   <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Ready to continue? Click "Continue to Next Round"') : 'Loading...'}</p>
@@ -1313,71 +1331,81 @@ export default function InterviewRoomPage() {
             <div className="absolute bottom-20 lg:bottom-8 right-8 pointer-events-auto">
               <div className="flex items-center gap-5 liquid-bg border border-white/20 rounded-full p-4 shadow-2xl">
 
-                {/* Mic Button – Main Action */}
-                <Button
-                  size="lg"
-                  variant="ghost"
-                  onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
-                  disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
-                  className={`
-          relative w-12 h-12 rounded-full p-0 transition-all duration-300 group
-          ${!questionReady
-                      ? "bg-gray-600 text-gray-500 cursor-not-allowed"
-                      : isRecording
-                        ? "bg-primary text-white shadow-2xl"
-                        : "bg-white text-gray-900 hover:scale-105 shadow-xl"
-                    }
-                    `}
-                >
-                  {/* Voice Visualization Bars - Show when recording */}
-                  {isRecording && (
-                    <div className="absolute -inset-4 flex items-center justify-center gap-1">
-                      {[...Array(5)].map((_, i) => {
-                        const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
-                        const wave = (Math.sin(phase) * 0.4 + 0.6);
-                        const baseHeight = 6;
-                        const maxHeight = 20;
-                        const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
-                        return (
-                          <div
-                            key={i}
-                            className="w-1 bg-white
- ring-1 ring-white rounded-full"
-                            style={{
-                              height: `${Math.max(baseHeight, height)}px`,
-                              opacity: 0.75 + (audioLevel / 400),
-                              transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
-                            }}
-                          />
-                        );
-                      })}
+                {/* Show waiting message during question */}
+                {phase === 'QUESTION' && (
+                  <div className="px-6 py-3">
+                    <div className="inline-flex items-center gap-2 text-sm font-medium text-white/90">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                      <span>Question being asked... Please wait</span>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Tooltip – Only when ready & not recording */}
-                  {!isRecording && questionReady && phase === 'LISTENING' && (
-                    <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
-                      <div className="relative bg-black text-white text-sm font-medium px-4 py-2.5 
-                rounded-xl shadow-xl backdrop-blur-md animate-pulse
-                border border-white/40">
-
-                        Turn On Your Mic
-
-                        {/* Arrow */}
-                        <div className="w-5 h-5 bg-black rotate-45 absolute bottom-[11px] -right-2 
-                  border-t border-r border-white/40" />
+                {/* Mic Button – Only show when in LISTENING phase */}
+                {phase === 'LISTENING' && questionReady && (
+                  <Button
+                    size="lg"
+                    variant="ghost"
+                    onClick={!isRecording ? startRecording : undefined}
+                    disabled={isRecording}
+                    className={`
+            relative w-12 h-12 rounded-full p-0 transition-all duration-300 group
+            ${
+                        isRecording
+                          ? "bg-primary text-white shadow-2xl"
+                          : "bg-white text-gray-900 hover:scale-105 shadow-xl"
+                      }
+                      `}
+                  >
+                    {/* Voice Visualization Bars - Show when recording */}
+                    {isRecording && (
+                      <div className="absolute -inset-4 flex items-center justify-center gap-1">
+                        {[...Array(5)].map((_, i) => {
+                          const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
+                          const wave = (Math.sin(phase) * 0.4 + 0.6);
+                          const baseHeight = 6;
+                          const maxHeight = 20;
+                          const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
+                          return (
+                            <div
+                              key={i}
+                              className="w-1 bg-white ring-1 ring-white rounded-full"
+                              style={{
+                                height: `${Math.max(baseHeight, height)}px`,
+                                opacity: 0.75 + (audioLevel / 400),
+                                transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
+                              }}
+                            />
+                          );
+                        })}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Icon / REC Label */}
-                  {isRecording ? (
-                    <div className="relative z-10">
-                    </div>
-                  ) : (
-                    <Mic className="w-20 h-20" />
-                  )}
-                </Button>
+                    {/* Tooltip – Only when ready & not recording */}
+                    {!isRecording && (
+                      <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
+                        <div className="relative bg-black text-white text-sm font-medium px-4 py-2.5 
+                  rounded-xl shadow-xl backdrop-blur-md animate-pulse
+                  border border-white/40">
+
+                          Turn On Your Mic
+
+                          {/* Arrow */}
+                          <div className="w-5 h-5 bg-black rotate-45 absolute bottom-[11px] -right-2 
+                    border-t border-r border-white/40" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Icon / REC Label */}
+                    {isRecording ? (
+                      <div className="relative z-10">
+                      </div>
+                    ) : (
+                      <Mic className="w-20 h-20" />
+                    )}
+                  </Button>
+                )}
 
                 {/* End Interview Button */}
                 <Button
@@ -1553,62 +1581,73 @@ export default function InterviewRoomPage() {
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-auto">
               <div className="flex items-center gap-4 liquid-bg border border-white/50 rounded-full p-4 shadow-xl">
 
-                {/* Mic Button */}
-                <Button
-                  size="lg"
-                  variant="ghost"
-                  onClick={(phase === 'LISTENING' && questionReady) ? startRecording : undefined}
-                  disabled={!(phase === 'LISTENING' && questionReady) || isRecording}
-                  className={`
-            relative w-14 h-14 rounded-full p-0 transition-all duration-300
-            ${!questionReady
-                      ? "bg-gray-600/40 text-gray-500 cursor-not-allowed"
-                      : isRecording
-                        ? "bg-black-600 text-blue hover:bg-black-700 shadow-lg ring-8 ring-gray-500/30"
-                        : "bg-white text-gray-900 hover:scale-105 shadow-xl"
-                    }
-          `}
-                >
-                  {/* Voice Visualization Bars - Mobile */}
-                  {isRecording && (
-                    <div className="absolute -inset-3 flex items-center justify-center gap-1">
-                      {[...Array(5)].map((_, i) => {
-                        const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
-                        const wave = (Math.sin(phase) * 0.4 + 0.6);
-                        const baseHeight = 5;
-                        const maxHeight = 18;
-                        const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
-                        return (
-                          <div
-                            key={i}
-                            className="w-1 bg-white rounded-full"
-                            style={{
-                              height: `${Math.max(baseHeight, height)}px`,
-                              opacity: 0.75 + (audioLevel / 400),
-                              transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
-                            }}
-                          />
-                        );
-                      })}
+                {/* Show waiting message during question */}
+                {phase === 'QUESTION' && (
+                  <div className="px-6 py-3">
+                    <div className="inline-flex items-center gap-2 text-sm font-medium text-white/90">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                      <span>Question being asked... Please wait</span>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {!isRecording && questionReady && phase === 'LISTENING' && (
-                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 pointer-events-none">
-                      <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
-                        Turn On Your Mic
+                {/* Mic Button - Only show when in LISTENING phase */}
+                {phase === 'LISTENING' && questionReady && (
+                  <Button
+                    size="lg"
+                    variant="ghost"
+                    onClick={!isRecording ? startRecording : undefined}
+                    disabled={isRecording}
+                    className={`
+              relative w-14 h-14 rounded-full p-0 transition-all duration-300
+              ${
+                        isRecording
+                          ? "bg-black-600 text-blue hover:bg-black-700 shadow-lg ring-8 ring-gray-500/30"
+                          : "bg-white text-gray-900 hover:scale-105 shadow-xl"
+                      }
+            `}
+                  >
+                    {/* Voice Visualization Bars - Mobile */}
+                    {isRecording && (
+                      <div className="absolute -inset-3 flex items-center justify-center gap-1">
+                        {[...Array(5)].map((_, i) => {
+                          const phase = (Date.now() / 200 + i * 0.8) % (Math.PI * 2);
+                          const wave = (Math.sin(phase) * 0.4 + 0.6);
+                          const baseHeight = 5;
+                          const maxHeight = 18;
+                          const height = baseHeight + (wave * (audioLevel / 100) * maxHeight);
+                          return (
+                            <div
+                              key={i}
+                              className="w-1 bg-white rounded-full"
+                              style={{
+                                height: `${Math.max(baseHeight, height)}px`,
+                                opacity: 0.75 + (audioLevel / 400),
+                                transition: 'height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
+                              }}
+                            />
+                          );
+                        })}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {isRecording ? (
-                    <div className="relative z-10">
+                    {!isRecording && (
+                      <div className="absolute -top-14 left-1/2 -translate-x-1/2 pointer-events-none">
+                        <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
+                          Turn On Your Mic
+                        </div>
+                      </div>
+                    )}
+
+                    {isRecording ? (
+                      <div className="relative z-10">
+                        <Mic className="w-7 h-7" />
+                      </div>
+                    ) : (
                       <Mic className="w-7 h-7" />
-                    </div>
-                  ) : (
-                    <Mic className="w-7 h-7" />
-                  )}
-                </Button>
+                    )}
+                  </Button>
+                )}
 
                 {/* End Call */}
                 <Button
