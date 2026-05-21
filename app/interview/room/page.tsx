@@ -630,11 +630,20 @@ export default function InterviewRoomPage() {
       setPhase('EVALUATING')
       setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
 
-      const suggestions = evalJson.evaluation?.improvementTips || evalJson.meta?.improvement_is || evalJson.improvement_is || (Array.isArray(evalJson.improvement) ? evalJson.improvement.join('. ') : '') || 'Continue practicing and refining your answers.'
-      setSuggestionsText(Array.isArray(suggestions) ? suggestions.join(' ') : suggestions)
+      const suggestions = evalJson.evaluation?.improvementTips || evalJson.meta?.improvement_is || evalJson.improvement_is || (Array.isArray(evalJson.improvement) ? evalJson.improvement : '') || 'Continue practicing and refining your answers.'
+
+      const chooseBestSuggestion = (items: string[] | string): string => {
+        if (!items) return 'Continue practicing and refining your answers.'
+        if (!Array.isArray(items)) return items
+        // Simple heuristic: choose the longest suggestion (more detailed)
+        return items.reduce((best, cur) => (cur && cur.length > (best?.length || 0) ? cur : best), items[0] || '')
+      }
+
+      const bestSuggestion = chooseBestSuggestion(suggestions)
+      setSuggestionsText(bestSuggestion)
       setPhase('SUGGESTIONS')
       setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
-      await speak(typeof suggestions === 'string' ? suggestions : suggestions.join(' '), currentRole, 'SUGGESTIONS').catch(() => { })
+      await speak(bestSuggestion, currentRole, 'SUGGESTIONS').catch(() => { })
       setSuggestionsText(null)
       setPhase('BREAK')
     } catch (err) {
