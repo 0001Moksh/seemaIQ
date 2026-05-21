@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError, switchGroqApiKey } from "@/lib/groq"
+import { generateGroqFollowUpQuestion, generateInterviewQuestion, evaluateInterviewAnswer, QuotaExceededError } from "@/lib/groq"
+import { InterviewAgentOrchestrator } from "@/lib/services/interview-agent-orchestrator.service"
 import { InterviewService } from "@/lib/services/interview.service"
 
 type Role = "hr" | "technical" | "manager"
@@ -30,13 +31,17 @@ export async function handleOrchestrate(body: any) {
   const role: Role = normalizeRole(body.role || "hr")
   const round: number = Number(body.round || 1)
   const previousQuestions: string[] = body.previousQuestions || []
-  const resumeData = body.resumeData || {}
-  const domain = body.domain || resumeData?.domain
+  const session = body.sessionId ? await InterviewService.getSession(body.sessionId).catch(() => null) : null
+  const resumeData = body.resumeData && Object.keys(body.resumeData).length > 0 ? body.resumeData : session?.resumeData || {}
+  const domain = body.domain || session?.domain || resumeData?.domain
+  const language = body.language || session?.language || resumeData?.language || "english"
+  const conversationMemory = body.conversationMemory || session?.conversationMemory || InterviewAgentOrchestrator.createInitialMemory(body.experience || session?.experience)
   const questionNum = Number(body.questionNum || 1)
   const questionsPerRound = Number(body.questionsPerRound || 5)
+  const experience = body.experience || session?.experience || "mid"
 
   if (action === "greet") {
-    const text = await greetText(role, resumeData?.name)
+    const text = await greetText(role, resumeData?.name, language)
     const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${0}/${questionsPerRound}`, role, status: "greet" }
     
     // Persist session state using service layer
@@ -52,9 +57,18 @@ export async function handleOrchestrate(body: any) {
   }
 
   if (action === "question") {
-    const q = await generateInterviewQuestion(role === "technical" ? "technical" : role === "hr" ? "hr" : "manager", resumeData?.experience || "mid", round, previousQuestions, resumeData, domain)
+    const q = await generateInterviewQuestion(role === "technical" ? "technical" : role === "hr" ? "hr" : "manager", experience, round, previousQuestions, resumeData, domain)
     const completedSoFar = Math.max(0, questionNum - 1)
-    const meta = { improvement_is: "", candidate_score: 0, interview_complete: false, question_complete: `${completedSoFar}/${questionsPerRound}`, role, status: "question" }
+    const meta = {
+      improvement_is: "",
+      candidate_score: 0,
+      interview_complete: false,
+      question_complete: `${completedSoFar}/${questionsPerRound}`,
+      role,
+      status: "question",
+      memory: conversationMemory,
+      adaptiveDifficulty: conversationMemory.adaptiveDifficulty,
+    }
     
     if (body.sessionId) {
       try {
@@ -73,12 +87,66 @@ export async function handleOrchestrate(body: any) {
   if (action === "evaluate") {
     const question = body.question || ""
     const answer = body.answer || ""
+    if (!question || !answer) {
+      const coachingText = InterviewAgentOrchestrator.buildRoundTransitionText(role, conversationMemory)
+      return {
+        text: coachingText,
+        meta: {
+          improvement_is: coachingText,
+          candidate_score: conversationMemory.lastAnswerQuality || 0,
+          interview_complete: false,
+          question_complete: `${Math.min(Number(body.completedCount || 0), questionsPerRound)}/${questionsPerRound}`,
+          role,
+          status: "coaching",
+          nextAction: "round_transition",
+          memory: conversationMemory,
+          adaptiveDifficulty: conversationMemory.adaptiveDifficulty,
+        },
+        evaluation: {
+          feedback: coachingText,
+          improvementTips: coachingText,
+        },
+      }
+    }
     const evalRes = await evaluateInterviewAnswer(question, answer, role === "technical" ? "technical" : role === "hr" ? "hr" : "manager")
     const improvement_is = evalRes.feedback || ""
     const candidate_score = Math.round((evalRes.clarity + evalRes.relevance + evalRes.completeness + evalRes.confidence) / 4)
     const completedCount = Number(body.completedCount || 0) + 1
     const finished = completedCount >= questionsPerRound
-    const meta = { improvement_is, candidate_score, interview_complete: finished, question_complete: `${completedCount}/${questionsPerRound}`, role, status: "conversation" }
+    const updatedMemory = InterviewAgentOrchestrator.updateMemoryFromAnswer(conversationMemory, {
+      answer,
+      evaluation: evalRes,
+      question,
+      role,
+      domain,
+    })
+    const shouldProbe = InterviewAgentOrchestrator.shouldAskFollowUp(updatedMemory, evalRes, answer, finished)
+
+    let followUpQuestion = ""
+    if (shouldProbe && question && answer) {
+      followUpQuestion = await generateGroqFollowUpQuestion(
+        question,
+        answer,
+        role === "technical" ? "technical" : role === "hr" ? "hr" : "manager",
+        resumeData?.name || "Candidate",
+        domain || "this role"
+      )
+      updatedMemory.followUpDepth += 1
+    } else {
+      updatedMemory.followUpDepth = 0
+    }
+
+    const meta = {
+      improvement_is,
+      candidate_score,
+      interview_complete: finished,
+      question_complete: `${completedCount}/${questionsPerRound}`,
+      role,
+      status: shouldProbe ? "followup" : "conversation",
+      nextAction: shouldProbe ? "followup" : finished ? "round_transition" : "continue",
+      memory: updatedMemory,
+      adaptiveDifficulty: updatedMemory.adaptiveDifficulty,
+    }
     
     if (body.sessionId) {
       try {
@@ -91,13 +159,16 @@ export async function handleOrchestrate(body: any) {
         
         // Auto-complete session when all questions are answered
         if (finished) {
+          await InterviewService.updateConversationMemory(body.sessionId, updatedMemory)
           await InterviewService.completeSession(body.sessionId)
+        } else {
+          await InterviewService.updateConversationMemory(body.sessionId, updatedMemory)
         }
       } catch (e) {
         console.warn('Persist evaluate state failed', e)
       }
     }
-    return { text: improvement_is, meta, evaluation: evalRes }
+    return { text: improvement_is, meta, evaluation: evalRes, followUpQuestion }
   }
 
   throw new Error("Unknown action")

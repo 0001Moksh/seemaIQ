@@ -11,7 +11,16 @@ export async function POST(request: Request) {
   
   try {
     const body = await request.json()
-    const { userId, resumeData, role = 'hr', experience = 'mid', questionsPerRound = 5 } = body
+    const {
+      userId,
+      resumeData,
+      domain,
+      language = "english",
+      persona = "friendly-recruiter",
+      role = "hr",
+      experience = "mid",
+      questionsPerRound = 5,
+    } = body
 
     if (!userId) {
       logger.warn("Session creation failed: Missing userId", { endpoint: "/api/interview/session/create" })
@@ -22,6 +31,9 @@ export async function POST(request: Request) {
     const sessionId = await InterviewService.createSession({
       userId,
       resumeData,
+      domain,
+      language,
+      persona,
       role,
       experience,
       questionsPerRound,

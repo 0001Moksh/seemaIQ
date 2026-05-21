@@ -136,18 +136,18 @@ export default function ResultsPage() {
         </div>
         </header>
         <header className=" border-border">
-          <div className="px-30 py-10 max-w-8xl mx-auto">
+          {/* <div className="px-30 py-10 max-w-8xl mx-auto">
             <Link href="/dashboard">
               <Button variant="outline" size="sm">
                 ← Back to Dashboard
               </Button>
             </Link>
-          </div>
+          </div> */}
         </header>
         <div className="max-w-4xl mx-auto px-4 py-12 text-center">
           <p className="text-destructive mb-4">Results not found</p>
           <Link href="/dashboard">
-            <Button>Return to Dashboard</Button>
+            <Button>Go to Dashboard</Button>
           </Link>
         </div>
       </main>

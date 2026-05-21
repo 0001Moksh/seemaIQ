@@ -30,6 +30,8 @@ interface ResumeData {
   github?: string
   portfolio?: string
   location?: string
+  domain?: string
+  language?: string
 }
 
 export default function InterviewSetupPage() {
@@ -320,15 +322,17 @@ export default function InterviewSetupPage() {
       let finalResumeData: ResumeData | null = null
       if (resumeSource === 'manual' || interviewWithoutResume) {
         finalResumeData = {
-          name: "",
-          email: "",
-          phone: "",
+          name: noResumeName.trim(),
+          email: noResumeEmail.trim(),
+          phone: noResumePhone.trim(),
           summary: "",
           skills: noResumeSkills,
           experience: noResumeExperience,
           education: [],
           projects: noResumeProjects,
           certifications: [],
+          domain: domain.trim(),
+          language: interviewLanguage,
         }
       } else if (resumeSource === 'profile') {
         // prefer resumeData, but fall back to authenticated user info
@@ -345,6 +349,14 @@ export default function InterviewSetupPage() {
         } : null)
       } else if (resumeSource === 'upload') {
         finalResumeData = resumeData
+      }
+
+      if (finalResumeData) {
+        finalResumeData = {
+          ...finalResumeData,
+          domain: domain.trim(),
+          language: interviewLanguage,
+        } as ResumeData & { domain: string; language: string }
       }
 
       if (!finalResumeData && !interviewWithoutResume) {
@@ -372,6 +384,9 @@ export default function InterviewSetupPage() {
           userId: user?.id || null,
           role: rounds[0], // Always start with HR (Round 1)
           experience,
+          domain: domain.trim(),
+          language: interviewLanguage,
+          persona: "friendly-recruiter",
           resumeData: finalResumeData,
           questionsPerRound: questionsPerRound,
         }),

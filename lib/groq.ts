@@ -1,17 +1,21 @@
 import Groq from "groq-sdk"
 import type { ResumeData } from "./resume-parser"
-import { buildSystemInstruction, generateFollowUpQuestion, generateFinalFeedback } from "./system-instructions"
+import { buildSystemInstruction, generateFinalFeedback } from "./system-instructions"
 
 let currentApiKeyIndex = 0
 
-// Get Groq API keys from environment (supports multiple keys for rotation)
-function getGroqClient() {
-  const apiKeys = [
+function getGroqApiKeys() {
+  return [
     process.env.GROQ_API_KEY,
     process.env.GROQ_API_ROUND_1,
     process.env.GROQ_API_ROUND_2,
     process.env.GROQ_API_ROUND_3,
   ].filter(Boolean) as string[]
+}
+
+// Get Groq API keys from environment (supports multiple keys for rotation)
+function getGroqClient() {
+  const apiKeys = getGroqApiKeys()
 
   if (apiKeys.length === 0) {
     throw new Error("No Groq API keys configured")
@@ -26,6 +30,59 @@ export function switchGroqApiKey() {
   currentApiKeyIndex++
 }
 
+async function createGroqChatCompletion(options: {
+  messages: Array<{ role: "user" | "system" | "assistant"; content: string }>
+  temperature: number
+  max_tokens: number
+}) {
+  const apiKeys = getGroqApiKeys()
+
+  if (apiKeys.length === 0) {
+    throw new Error("No Groq API keys configured")
+  }
+
+  let lastError: any = null
+
+  for (let attempt = 0; attempt < apiKeys.length; attempt++) {
+    const keyIndex = (currentApiKeyIndex + attempt) % apiKeys.length
+    const client = new Groq({ apiKey: apiKeys[keyIndex] })
+
+    try {
+      const response = await client.chat.completions.create({
+        messages: options.messages,
+        model: "llama-3.3-70b-versatile",
+        temperature: options.temperature,
+        max_tokens: options.max_tokens,
+      })
+
+      currentApiKeyIndex = keyIndex
+      return response
+    } catch (error: any) {
+      lastError = error
+
+      if (error?.status === 401) {
+        console.warn(`Groq API key ${keyIndex + 1} is invalid or expired. Trying next configured key.`)
+        continue
+      }
+
+      if (error?.status === 429) {
+        console.warn(`Groq API key ${keyIndex + 1} quota exceeded. Trying next configured key.`)
+        continue
+      }
+
+      throw error
+    }
+  }
+
+  currentApiKeyIndex++
+
+  if (lastError?.status === 429) {
+    throw new QuotaExceededError(lastError?.headers?.["retry-after"] || 60)
+  }
+
+  throw lastError || new Error("Groq request failed")
+}
+
 export class QuotaExceededError extends Error {
   constructor(public retryAfterSeconds: number = 60) {
     super("Groq API quota exceeded. Please try again later.")
@@ -35,25 +92,31 @@ export class QuotaExceededError extends Error {
 
 export async function generateInterviewQuestion(
   role: "hr" | "technical" | "manager",
-  experience: "junior" | "mid" | "senior",
+  experience: string,
   round: number,
   previousQuestions: string[] = [],
   resumeData?: ResumeData,
   domain?: string,
 ): Promise<string> {
-  const client = getGroqClient()
-
   // Domain mapping (exactly as in your frontend)
   const domainDescriptions: Record<string, string> = {
     software: "Software Engineering (Web, Mobile, Frontend, Backend, Full-Stack Development)",
+    "software engineering": "Software Engineering (Web, Mobile, Frontend, Backend, Full-Stack Development)",
     data: "Data Science & AI/ML (Python, Machine Learning, Deep Learning, Data Analysis)",
+    "data science & ai/ml": "Data Science & AI/ML (Python, Machine Learning, Deep Learning, Data Analysis)",
     product: "Product Management (Feature Planning, Team Management, User Research, Growth)",
+    "product management": "Product Management (Feature Planning, Team Management, User Research, Growth)",
     design: "UI/UX Design (User Flows, Prototyping, Figma, Design Systems)",
+    "ui/ux design": "UI/UX Design (User Flows, Prototyping, Figma, Design Systems)",
     devops: "DevOps & Cloud Engineering (AWS, Docker, Kubernetes, CI/CD, Infrastructure)",
+    "devops / cloud": "DevOps & Cloud Engineering (AWS, Docker, Kubernetes, CI/CD, Infrastructure)",
     other: "General Roles (Sales, Marketing, HR, Operations, Support etc.)",
   }
 
-  const domainDesc = domain ? domainDescriptions[domain] || domainDescriptions.other : "a professional role"
+  const normalizedDomain = domain?.trim().toLowerCase()
+  const domainDesc: string = normalizedDomain
+    ? domainDescriptions[normalizedDomain] ?? domain ?? "a professional role"
+    : "a professional role"
 
   // If no domain provided, try to infer from resumeData (skills / projects / experience)
   if (!domain && resumeData) {
@@ -108,14 +171,13 @@ Examples:
 Return only the question. Nothing else.`
 
     try {
-      const message = await client.chat.completions.create({
+      const message = await createGroqChatCompletion({
         messages: [
           {
             role: "user",
             content: introPrompt,
           },
         ],
-        model: "llama-3.3-70b-versatile",
         temperature: 0.7,
         max_tokens: 200,
       })
@@ -128,7 +190,7 @@ Return only the question. Nothing else.`
         switchGroqApiKey()
         throw new QuotaExceededError(60)
       }
-      console.warn("Groq failed for HR intro, using fallback", err)
+      console.warn(`Groq failed for HR intro, using fallback: ${err?.message || "unknown error"}`)
     }
   }
 
@@ -157,14 +219,13 @@ Rules:
 Question:`
 
   try {
-    const message = await client.chat.completions.create({
+    const message = await createGroqChatCompletion({
       messages: [
         {
           role: "user",
           content: prompt,
         },
       ],
-      model: "llama-3.3-70b-versatile",
       temperature: 0.7,
       max_tokens: 200,
     })
@@ -186,7 +247,7 @@ Question:`
       switchGroqApiKey()
       throw new QuotaExceededError(60)
     }
-    console.error("Groq question generation failed:", err)
+    console.warn(`Groq question generation failed, using fallback: ${err?.message || "unknown error"}`)
   }
 
   // Final Fallback with Name + Domain
@@ -243,8 +304,6 @@ export async function evaluateInterviewAnswer(
   confidence: number
   feedback: string
 }> {
-  const client = getGroqClient()
-
   const prompt = `You are an expert ${role} interviewer evaluating a candidate's response.
 
 Question: "${question}"
@@ -268,14 +327,13 @@ Provide your evaluation in the following JSON format:
 Respond with only valid JSON, no additional text.`
 
   try {
-    const message = await client.chat.completions.create({
+    const message = await createGroqChatCompletion({
       messages: [
         {
           role: "user",
           content: prompt,
         },
       ],
-      model: "llama-3.3-70b-versatile",
       temperature: 0.7,
       max_tokens: 300,
     })
@@ -302,7 +360,7 @@ Respond with only valid JSON, no additional text.`
       switchGroqApiKey()
       throw new QuotaExceededError(60)
     }
-    console.error("Error parsing Groq response:", error)
+    console.warn(`Groq evaluation failed, using default feedback: ${error?.message || "unknown error"}`)
     // Return default scores if parsing fails
     return {
       clarity: 75,
@@ -314,7 +372,64 @@ Respond with only valid JSON, no additional text.`
   }
 }
 
-export { buildSystemInstruction, generateFollowUpQuestion, generateFinalFeedback }
+export async function generateGroqFollowUpQuestion(
+  previousQuestion: string,
+  candidateAnswer: string,
+  role: "hr" | "technical" | "manager",
+  candidateName: string,
+  domain: string,
+): Promise<string> {
+  const prompt = `You are a realistic ${role} interviewer speaking with ${candidateName} about ${domain}.
+
+Previous question: "${previousQuestion}"
+Candidate answer: "${candidateAnswer}"
+
+Ask ONE natural follow-up question that feels conversational and human.
+Use short interviewer phrasing like "Interesting", "Can you walk me through", or "Let me ask this another way" only if it fits.
+Do not use markdown, bullets, numbering, or explanations.
+Return only the follow-up question.`
+
+  try {
+    const message = await createGroqChatCompletion({
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.75,
+      max_tokens: 160,
+    })
+
+    const followUp = message.choices[0]?.message?.content?.replace(/[\*#_`]/g, "").trim() || ""
+    if (followUp.length > 10) return followUp
+  } catch (error: any) {
+    console.warn(`Groq follow-up generation failed, using fallback: ${error?.message || "unknown error"}`)
+  }
+
+  const fallbackQuestions: Record<string, string[]> = {
+    hr: [
+      "Interesting. Can you share a specific example where that experience shaped how you work with a team?",
+      "Can you explain that a little further, especially what you personally contributed?",
+      "What was the most important lesson you took from that situation?",
+    ],
+    technical: [
+      "Interesting. Can you walk me through the technical decision behind that approach?",
+      "What trade-off did you consider there, and why did you choose that solution?",
+      "If the same system had to scale further, what would you improve first?",
+    ],
+    manager: [
+      "Can you explain how you handled the people or stakeholder side of that situation?",
+      "What was the impact of that decision on the team or business outcome?",
+      "If you faced that again, what would you do differently as an owner?",
+    ],
+  }
+
+  const pool = fallbackQuestions[role] || fallbackQuestions.hr
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+export { buildSystemInstruction, generateFinalFeedback }
 
 export async function transcribeAudio(audioBuffer: Buffer): Promise<string> {
   // For now, return placeholder

@@ -12,6 +12,10 @@ export interface InterviewSession {
   _id?: ObjectId
   userId: ObjectId
   resumeData: any
+  domain?: string
+  language?: "english" | "hindi"
+  persona?: string
+  conversationMemory?: any
   role: string
   experience: string
   questionsPerRound: number
@@ -155,6 +159,9 @@ export class InterviewService {
   static async createSession(data: {
     userId: string
     resumeData?: any
+    domain?: string
+    language?: "english" | "hindi"
+    persona?: string
     role?: string
     experience?: string
     questionsPerRound?: number
@@ -162,9 +169,25 @@ export class InterviewService {
     try {
       const db = await getDatabase()
 
+      const domain = data.domain || data.resumeData?.domain || ""
+      const resumeData = data.resumeData ? { ...data.resumeData, domain } : null
       const session: Partial<InterviewSession> = {
         userId: new ObjectId(data.userId),
-        resumeData: data.resumeData || null,
+        resumeData,
+        domain,
+        language: data.language || "english",
+        persona: data.persona || "friendly-recruiter",
+        conversationMemory: {
+          discussedTopics: [],
+          mentionedTechnologies: [],
+          weakAreas: [],
+          strengths: [],
+          confidenceTrend: [],
+          lastAnswerQuality: null,
+          followUpDepth: 0,
+          adaptiveDifficulty: data.experience === "senior" ? "advanced" : data.experience === "junior" ? "supportive" : "balanced",
+          notes: [],
+        },
         role: data.role || "hr",
         experience: data.experience || "mid",
         questionsPerRound: data.questionsPerRound || 5,
@@ -267,6 +290,25 @@ export class InterviewService {
     } catch (error) {
       console.error("Error adding answer:", error)
       throw new Error("Failed to add answer to session")
+    }
+  }
+
+  static async updateConversationMemory(sessionId: string, memory: any): Promise<void> {
+    try {
+      const db = await getDatabase()
+
+      await db.collection("sessions").updateOne(
+        { _id: new ObjectId(sessionId) },
+        {
+          $set: {
+            conversationMemory: memory,
+            updatedAt: new Date(),
+          },
+        }
+      )
+    } catch (error) {
+      console.error("Error updating conversation memory:", error)
+      throw new Error("Failed to update conversation memory")
     }
   }
 

@@ -10,6 +10,17 @@ import { audioQueue } from "@/lib/audio-queue";
 
 type Phase = "GREET" | "QUESTION" | "LISTENING" | "FEEDBACK" | "SUGGESTIONS" | "EVALUATING" | "BREAK" | "COMPLETE";
 type Role = "hr" | "expert" | "manager";
+type ConversationMemory = {
+  discussedTopics: string[];
+  mentionedTechnologies: string[];
+  weakAreas: string[];
+  strengths: string[];
+  confidenceTrend: number[];
+  lastAnswerQuality: number | null;
+  followUpDepth: number;
+  adaptiveDifficulty: "supportive" | "balanced" | "advanced";
+  notes: string[];
+};
 
 export default function InterviewRoomPage() {
   const router = useRouter();
@@ -42,11 +53,19 @@ export default function InterviewRoomPage() {
   const [isOnline, setIsOnline] = useState(true);
   const [networkQuality, setNetworkQuality] = useState<'excellent' | 'good' | 'poor'>('excellent');
   const [audioLevel, setAudioLevel] = useState(0);
+  const [speechRecognitionSupported, setSpeechRecognitionSupported] = useState<boolean | null>(null);
+  const [useFallbackInput, setUseFallbackInput] = useState(false);
+  const [manualAnswer, setManualAnswer] = useState("");
+  const [sessionResumeData, setSessionResumeData] = useState<any>({});
+  const [sessionDomain, setSessionDomain] = useState("");
+  const [interviewLanguage, setInterviewLanguage] = useState<"english" | "hindi">("english");
+  const [conversationMemory, setConversationMemory] = useState<ConversationMemory | null>(null);
   const isFetchingQuestionRef = useRef(false);
   const breakTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const speechRecognitionAttempts = useRef(0);
 
   const userInitial = user?.name?.[0]?.toUpperCase() || "U";
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -66,6 +85,8 @@ export default function InterviewRoomPage() {
   const currentAudioUrl = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
+  const isRecordingRef = useRef(false);
+  const useFallbackInputRef = useRef(false);
 
   // Network monitoring
   useEffect(() => {
@@ -126,9 +147,14 @@ export default function InterviewRoomPage() {
         }
         const data = await res.json()
         const sess = data.session
+        const resumePayload = sess?.resumeData || {}
+        setSessionResumeData(resumePayload)
+        setSessionDomain(sess?.domain || resumePayload?.domain || "")
+        setInterviewLanguage(sess?.language || resumePayload?.language || "english")
+        setConversationMemory(sess?.conversationMemory || null)
         if (sess?.status === 'paused') {
           // restore core state from session: role, currentRound, transcript and questions
-          setCurrentRole(sess.role || 'hr')
+          setCurrentRole(normalizeRoomRole(sess.role))
           setRound(sess.currentRound || 1)
           setQuestionsPerRound(sess.questionsPerRound || 5)
           setPhase('BREAK')
@@ -146,7 +172,7 @@ export default function InterviewRoomPage() {
           setVideoUrl(null)
         } else {
           // active session: restore and continue
-          setCurrentRole(sess.role || 'hr')
+          setCurrentRole(normalizeRoomRole(sess.role))
           setRound(sess.currentRound || 1)
           setQuestionsPerRound(sess.questionsPerRound || 5)
           // Restore transcript
@@ -159,7 +185,7 @@ export default function InterviewRoomPage() {
           }
           if (transcriptItems.length > 0) setTranscript(transcriptItems)
           // If session has a pending question, fetch it
-          startRound(sess?.role || 'hr')
+          startRound(normalizeRoomRole(sess?.role), false)
         }
       } catch (err) {
         startRound('hr')
@@ -178,6 +204,15 @@ export default function InterviewRoomPage() {
       if (mobileTranscriptRef.current) mobileTranscriptRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { }
   }, [transcript]);
+
+  useEffect(() => {
+    // Detect Speech Recognition support
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setSpeechRecognitionSupported(!!SpeechRecognition);
+    if (!SpeechRecognition) {
+      console.warn('Speech Recognition not supported on this browser');
+    }
+  }, []);
 
   useEffect(() => {
     // mark presence when mounting and cleanup on unmount
@@ -221,7 +256,8 @@ export default function InterviewRoomPage() {
   const cleanup = () => {
     // Clear audio queue to stop any pending speech
     audioQueue.clear();
-    
+    isRecordingRef.current = false;
+
     if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
     recorderRef.current?.stream?.getTracks().forEach(t => t.stop());
     if (streamRef.current) {
@@ -250,6 +286,12 @@ export default function InterviewRoomPage() {
     return questionsPerRound;
   };
 
+  const normalizeRoomRole = (role?: string): Role => {
+    if (role === "technical" || role === "expert") return "expert";
+    if (role === "manager") return "manager";
+    return "hr";
+  };
+
   const getVideoForPhase = (role: Role, p: Phase | string) => {
     switch (p) {
       case "GREET":
@@ -267,7 +309,7 @@ export default function InterviewRoomPage() {
     }
   };
 
-  const startRound = (role: Role) => {
+  const startRound = (role: Role, resetTranscript = true) => {
     cleanup();
     setCurrentRole(role);
     setQuestionCount(1);
@@ -275,7 +317,7 @@ export default function InterviewRoomPage() {
     setPhase("GREET");
     setGreetingText(null);
     setVideoUrl(`/videos/${role}/greet.mp4`);
-    setTranscript([]);
+    if (resetTranscript) setTranscript([]);
     setSilenceCountdown(null);
     hasSpoken.current = false;
     currentAnswer.current = "";
@@ -286,18 +328,18 @@ export default function InterviewRoomPage() {
 
   const speak = async (text: string, role: Role, p?: Phase) => {
     if (!text.trim()) return Promise.resolve();
-    
+
     try {
       setIsSpeaking(true);
       const phaseToUse = p ?? phase;
       const v = getVideoForPhase(role, phaseToUse);
       if (v) setVideoUrl(v);
-      
+
       // Use audio queue instead of direct speech synthesis to prevent interruptions
       await audioQueue.speak(text, 'en-US', 1.2);
-      
+
       setIsSpeaking(false);
-      
+
       // Mark question ready and switch to listening phase when question completes
       if (phaseToUse === 'QUESTION') {
         setQuestionReady(true);
@@ -312,7 +354,7 @@ export default function InterviewRoomPage() {
     } catch (err) {
       console.error('Speech error:', err);
       setIsSpeaking(false);
-      
+
       // Ensure question ready even on error
       if ((p ?? phase) === 'QUESTION') {
         setQuestionReady(true);
@@ -330,14 +372,22 @@ export default function InterviewRoomPage() {
     try {
       const roleToUse = roleArg ?? currentRole;
       const token = localStorage.getItem("authToken");
-      const domain = (window as any).__SESSION?.resumeData?.domain;
+      const domain = sessionDomain || sessionResumeData?.domain;
       const res = await fetch("/api/interview/orchestrate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: "greet", role: roleToUse, resumeData: (window as any).__SESSION?.resumeData || {}, domain }),
+        body: JSON.stringify({
+          action: "greet",
+          sessionId,
+          role: roleToUse,
+          resumeData: sessionResumeData || {},
+          domain,
+          language: interviewLanguage,
+          conversationMemory,
+        }),
       });
 
       // Handle Gemini quota exceeded (429)
@@ -355,7 +405,7 @@ export default function InterviewRoomPage() {
 
       if (res.status === 410) {
         // fallback to local template greeting
-        const candidateName = (window as any).__SESSION?.resumeData?.name?.split(" ")[0] || "there";
+        const candidateName = sessionResumeData?.name?.split(" ")[0] || "there";
         const templates: Record<string, string> = {
           hr: `Hello ${candidateName}, I’m Mira Sharma from HR. In this round, we’ll focus on communication, attitude and workplace behavior. Let’s begin`,
           expert: `Hi ${candidateName}, I’m Ashish Yadav, Domain Expert. I’ll be evaluating your problem-solving approach and your technical fundamentals. Ready to start?`,
@@ -412,7 +462,7 @@ export default function InterviewRoomPage() {
       setQuestionReady(false);
       const token = localStorage.getItem("authToken");
       const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-      const domain = (window as any).__SESSION?.resumeData?.domain;
+      const domain = sessionDomain || sessionResumeData?.domain;
       // Use orchestrator to get question
       const roleToUse = roleArg ?? currentRole;
       const prevQuestions = transcript.filter(t => t.type === 'question').map(q => q.text)
@@ -422,7 +472,19 @@ export default function InterviewRoomPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: 'question', role: roleToUse, round, questionNum: num, previousQuestions: prevQuestions, resumeData: (window as any).__SESSION?.resumeData || {}, questionsPerRound: getMaxQuestionsForRole(roleToUse), domain })
+        body: JSON.stringify({
+          action: 'question',
+          sessionId,
+          role: roleToUse,
+          round,
+          questionNum: num,
+          previousQuestions: prevQuestions,
+          resumeData: sessionResumeData || {},
+          questionsPerRound: getMaxQuestionsForRole(roleToUse),
+          domain,
+          language: interviewLanguage,
+          conversationMemory,
+        })
       })
 
       // Handle Gemini quota exceeded (429)
@@ -447,6 +509,7 @@ export default function InterviewRoomPage() {
       if (!res.ok) throw new Error('Failed to load question')
       const data = await res.json()
       setError(null) // Clear any previous errors
+      if (data.meta?.memory) setConversationMemory(data.meta.memory)
       const qText = data.text || data?.question || ''
       const question = { id: `orchestrator-${num}`, text: qText, round }
       setCurrentQuestion(question)
@@ -481,7 +544,20 @@ export default function InterviewRoomPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, question: currentQuestion?.text, answer: currentAnswer.current, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole), sessionId }),
+        body: JSON.stringify({
+          action: 'evaluate',
+          role: currentRole,
+          round,
+          question: currentQuestion?.text,
+          answer: currentAnswer.current,
+          completedCount: questionCount,
+          questionsPerRound: getMaxQuestionsForRole(currentRole),
+          sessionId,
+          domain: sessionDomain || sessionResumeData?.domain,
+          resumeData: sessionResumeData || {},
+          language: interviewLanguage,
+          conversationMemory,
+        }),
       })
 
       if (res.status === 410) {
@@ -498,6 +574,7 @@ export default function InterviewRoomPage() {
 
       if (!res.ok) throw new Error('Failed to get feedback')
       const data = await res.json()
+      if (data.meta?.memory) setConversationMemory(data.meta.memory)
       const feedback = data.text || data?.meta?.improvement_is || (data.evaluation?.feedback) || 'Good.'
       setFeedbackText(feedback)
       setPhase('FEEDBACK')
@@ -527,7 +604,18 @@ export default function InterviewRoomPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, sessionId, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole) }),
+        body: JSON.stringify({
+          action: 'evaluate',
+          role: currentRole,
+          round,
+          sessionId,
+          completedCount: questionCount,
+          questionsPerRound: getMaxQuestionsForRole(currentRole),
+          domain: sessionDomain || sessionResumeData?.domain,
+          resumeData: sessionResumeData || {},
+          language: interviewLanguage,
+          conversationMemory,
+        }),
       })
 
       if (evalRes.status === 410) {
@@ -537,6 +625,7 @@ export default function InterviewRoomPage() {
 
       if (!evalRes.ok) throw new Error('Eval failed')
       const evalJson = await evalRes.json()
+      if (evalJson.meta?.memory) setConversationMemory(evalJson.meta.memory)
       setRoundEvaluation(evalJson.evaluation || evalJson)
       setPhase('EVALUATING')
       setVideoUrl(`/videos/${currentRole}/conversation.mp4`)
@@ -565,6 +654,7 @@ export default function InterviewRoomPage() {
       recorder.ondataavailable = e => audioChunksRef.current.push(e.data);
       recorder.start();
       setIsRecording(true);
+      isRecordingRef.current = true;
       setVideoUrl(`/videos/${currentRole}/listening.mp4`);
       setPhase("LISTENING");
       currentAnswer.current = "";
@@ -636,7 +726,26 @@ export default function InterviewRoomPage() {
 
   const startSpeechRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert("Speech Recognition not supported");
+    if (!SpeechRecognition) {
+      console.warn("Speech Recognition not supported");
+      setSpeechRecognitionSupported(false);
+      setUseFallbackInput(true);
+      useFallbackInputRef.current = true;
+      setError({ message: "Voice input not supported on this browser. Please use text input." });
+      return;
+    }
+
+    speechRecognitionAttempts.current += 1;
+    
+    // If we've tried 3 times and failed, switch to fallback
+    if (speechRecognitionAttempts.current > 3) {
+      console.warn("Speech recognition failed multiple times, switching to text input");
+      setUseFallbackInput(true);
+      useFallbackInputRef.current = true;
+      setSpeechRecognitionSupported(false);
+      setError({ message: "Voice input is having issues. Please use text input." });
+      return;
+    }
 
     const rec = new SpeechRecognition();
     recognitionRef.current = rec;
@@ -647,14 +756,22 @@ export default function InterviewRoomPage() {
     let timeoutId: NodeJS.Timeout | null = null;
 
     rec.onstart = () => {
+      console.log('Speech recognition started');
       speechStarted = false;
-      // Set timeout to abort if no speech detected within 15 seconds
+      setSpeechRecognitionSupported(true);
+      // Set timeout to abort if no speech detected within 20 seconds
       timeoutId = setTimeout(() => {
         if (!speechStarted && rec) {
+          console.warn("No speech detected in 20 seconds, trying fallback");
           rec.abort();
-          console.warn("Speech recognition timeout: no audio detected, aborting");
+          // After timeout, suggest fallback
+          if (speechRecognitionAttempts.current >= 2) {
+            setUseFallbackInput(true);
+            useFallbackInputRef.current = true;
+            setError({ message: "Having trouble detecting your voice. Try text input below." });
+          }
         }
-      }, 15000);
+      }, 20000);
     };
 
     rec.onresult = (e: any) => {
@@ -662,6 +779,9 @@ export default function InterviewRoomPage() {
       if (!speechStarted) {
         speechStarted = true;
         if (timeoutId) clearTimeout(timeoutId);
+        // Reset attempts counter on successful recognition
+        speechRecognitionAttempts.current = 0;
+        setSpeechRecognitionSupported(true);
       }
 
       let final = "";
@@ -705,30 +825,46 @@ export default function InterviewRoomPage() {
       };
 
       const errorMsg = errorMessages[e.error] || `Speech error: ${e.error}`;
-      console.error("Speech recognition error:", e.error, "-", errorMsg);
+      console.warn("Speech recognition issue:", e.error, "-", errorMsg);
 
       // For transient errors, auto-retry after a short delay
-      if (["no-speech", "audio-capture"].includes(e.error) && isRecording) {
+      if (["no-speech", "audio-capture", "network", "aborted"].includes(e.error) && isRecordingRef.current) {
+        if (e.error === "network" && speechRecognitionAttempts.current >= 2) {
+          setUseFallbackInput(true);
+          useFallbackInputRef.current = true;
+          setSpeechRecognitionSupported(false);
+          setError({ message: "Voice recognition network is unstable. Please type your answer below." });
+          return;
+        }
+
         console.warn("Auto-retrying speech recognition...");
-        setError({ message: errorMsg, retryAfter: 2 });
+        setError({ message: errorMsg + " Retrying...", retryAfter: 2 });
         setTimeout(() => {
-          if (isRecording && recognitionRef.current !== rec) {
+          if (isRecordingRef.current && recognitionRef.current === rec) {
             startSpeechRecognition();
           }
         }, 2000);
+      } else if (["not-allowed", "service-not-allowed"].includes(e.error)) {
+        // Permanent errors - switch to fallback immediately
+        console.warn("Speech recognition not allowed, switching to text input");
+        setUseFallbackInput(true);
+        useFallbackInputRef.current = true;
+        setSpeechRecognitionSupported(false);
+        setError({ message: "Voice input not available. Please use text input below." });
       }
     };
 
     rec.onend = () => {
+      console.log('Speech recognition ended');
       if (timeoutId) clearTimeout(timeoutId);
-      // If still recording but recognition ended, attempt to restart
-      if (isRecording && !hasSpoken.current && recognitionRef.current === rec) {
-        console.log("Speech recognition ended without speech, restarting...");
+      // If still recording but recognition ended unexpectedly, attempt to restart
+      if (isRecordingRef.current && recognitionRef.current === rec && !useFallbackInputRef.current) {
+        console.log("Speech recognition ended, restarting...");
         setTimeout(() => {
-          if (isRecording) {
+          if (isRecordingRef.current && recognitionRef.current === rec && !useFallbackInputRef.current) {
             startSpeechRecognition();
           }
-        }, 1000);
+        }, 500);
       }
     };
 
@@ -792,6 +928,7 @@ export default function InterviewRoomPage() {
   const submitAnswer = async () => {
     cleanup();
     setIsRecording(false);
+    isRecordingRef.current = false;
     setSilenceCountdown(null);
 
     if (!currentQuestion || !currentAnswer.current.trim()) {
@@ -808,7 +945,20 @@ export default function InterviewRoomPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ action: 'evaluate', role: currentRole, round, question: currentQuestion.text, answer: currentAnswer.current, completedCount: questionCount, questionsPerRound: getMaxQuestionsForRole(currentRole), sessionId }),
+        body: JSON.stringify({
+          action: 'evaluate',
+          role: currentRole,
+          round,
+          question: currentQuestion.text,
+          answer: currentAnswer.current,
+          completedCount: questionCount,
+          questionsPerRound: getMaxQuestionsForRole(currentRole),
+          sessionId,
+          domain: sessionDomain || sessionResumeData?.domain,
+          resumeData: sessionResumeData || {},
+          language: interviewLanguage,
+          conversationMemory,
+        }),
       })
 
       // Handle Gemini quota exceeded (429)
@@ -836,6 +986,7 @@ export default function InterviewRoomPage() {
       if (!res.ok) throw new Error('Failed to submit answer')
       const data = await res.json()
       setError(null)
+      if (data.meta?.memory) setConversationMemory(data.meta.memory)
       const maxQuestions = getMaxQuestionsForRole(currentRole)
       if (questionCount >= maxQuestions) {
         setPhase('EVALUATING')
@@ -849,6 +1000,23 @@ export default function InterviewRoomPage() {
         // Clear feedback after speech ends, then move to next question
         setTimeout(() => {
           setFeedbackText(null)
+          if (data.meta?.nextAction === "followup" && data.followUpQuestion) {
+            const followUp = {
+              id: `followup-${round}-${questionCount}-${Date.now()}`,
+              text: data.followUpQuestion,
+              round,
+            }
+            setCurrentQuestion(followUp)
+            setTranscript(prev => [...prev, { type: "question", text: followUp.text }])
+            setPhase("QUESTION")
+            setQuestionReady(false)
+            setVideoUrl(`/videos/${currentRole}/question.mp4`)
+            speak(followUp.text, currentRole, "QUESTION").catch(() => {
+              setQuestionReady(true)
+              setPhase("LISTENING")
+            })
+            return
+          }
           const maxQuestions = getMaxQuestionsForRole(currentRole)
           if (questionCount < maxQuestions) {
             setQuestionCount(prev => prev + 1)
@@ -1052,12 +1220,12 @@ export default function InterviewRoomPage() {
           <div className="relative h-96 border border-primary/50 lg:h-full bg-black shadow-2xl rounded-lg lg:rounded-2xl overflow-hidden">
             {/* Background Image - only show when video is playing */}
             {videoUrl && (
-              <div 
+              <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                 style={{ backgroundImage: `url(/videos/${currentRole}/bg.jpeg)` }}
               />
             )}
-            
+
             {/* Video Overlay */}
             {videoUrl ? (
               <video
@@ -1084,7 +1252,7 @@ export default function InterviewRoomPage() {
               <div className="relative z-10 w-full h-full flex items-center justify-center text-white text-xl animate-in fade-in duration-300">
                 <div className="flex flex-col items-center gap-4">
                   <img src={`/videos/${currentRole}/profile.png`} alt="Interviewer" className="w-36 h-36 rounded-full object-cover border-2 border-white/40 shadow-2xl" />
-                  <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Ready to continue? Click "Continue to Next Round"') : 'Loading...'}</p>
+                  <p className="text-lg">{phase === 'BREAK' ? (breakTimer !== null && breakTimer > 0 ? `Break Time — Next Round in ${breakTimer}s` : 'Click on "Next ->" Button to Continue...') : 'Loading...'}</p>
                 </div>
               </div>
             )}
@@ -1296,6 +1464,36 @@ export default function InterviewRoomPage() {
                 ))
               )}
             </div>
+
+            {/* Fallback Text Input - Desktop */}
+            {useFallbackInput && phase === 'LISTENING' && questionReady && (
+              <div className="px-4 pb-4 border-t border-border/80 pt-4">
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-3 text-sm text-yellow-800">
+                  Voice input unavailable. Please type your answer below.
+                </div>
+                <textarea
+                  value={manualAnswer}
+                  onChange={(e) => setManualAnswer(e.target.value)}
+                  placeholder="Type your answer here..."
+                  className="w-full p-3 rounded-lg border border-border bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  rows={5}
+                />
+                <Button
+                  onClick={() => {
+                    const answer = manualAnswer.trim();
+                    if (answer) {
+                      currentAnswer.current = answer;
+                      setManualAnswer("");
+                      submitAnswer();
+                    }
+                  }}
+                  disabled={!manualAnswer.trim()}
+                  className="mt-3 w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:opacity-50"
+                >
+                  Submit Answer
+                </Button>
+              </div>
+            )}
           </Card>
           {/* Clean & Professional Floating Control Bar */}
           <div className="fixed inset-0 pointer-events-none z-50">
@@ -1335,14 +1533,14 @@ export default function InterviewRoomPage() {
                 {phase === 'QUESTION' && (
                   <div className="px-6 py-3">
                     <div className="inline-flex items-center gap-2 text-sm font-medium text-white/90">
-                      <Sparkles className="w-4 h-4 animate-pulse" />
-                      <span>Question being asked... Please wait</span>
+                      <Mic className="w-4 h-4 animate-pulse" />
+                      {/* <span>Question being asked... Please wait</span> */}
                     </div>
                   </div>
                 )}
 
-                {/* Mic Button – Only show when in LISTENING phase */}
-                {phase === 'LISTENING' && questionReady && (
+                {/* Mic Button – Only show when in LISTENING phase and not using fallback */}
+                {phase === 'LISTENING' && questionReady && !useFallbackInput && (
                   <Button
                     size="lg"
                     variant="ghost"
@@ -1350,10 +1548,9 @@ export default function InterviewRoomPage() {
                     disabled={isRecording}
                     className={`
             relative w-12 h-12 rounded-full p-0 transition-all duration-300 group
-            ${
-                        isRecording
-                          ? "bg-primary text-white shadow-2xl"
-                          : "bg-white text-gray-900 hover:scale-105 shadow-xl"
+            ${isRecording
+                        ? "bg-primary text-white shadow-2xl"
+                        : "bg-white text-gray-900 hover:scale-105 shadow-xl"
                       }
                       `}
                   >
@@ -1405,6 +1602,13 @@ export default function InterviewRoomPage() {
                       <Mic className="w-20 h-20" />
                     )}
                   </Button>
+                )}
+
+                {/* Fallback Submit Button - Desktop - Show in floating controls */}
+                {phase === 'LISTENING' && questionReady && useFallbackInput && (
+                  <div className="px-4 py-2 bg-white/10 rounded-full text-white text-sm font-medium">
+                    Type answer in sidebar →
+                  </div>
                 )}
 
                 {/* End Interview Button */}
@@ -1510,35 +1714,48 @@ export default function InterviewRoomPage() {
                 [...transcript].reverse().map((item, i) => (
                   <div
                     key={i}
-                    className={`flex gap-2 ${item.type === "answer" ? "flex-row-reverse" : ""
-                      } animate-in fade-in-50 duration-300`}
+                    className={`flex gap-1 ${item.type === "answer" ? "flex-row-reverse" : ""} animate-in fade-in-50 duration-300`}
                   >
                     {item.type === "question" ? (
                       <img
                         src={`/videos/${currentRole}/profile.png`}
                         alt="Interviewer"
-                        className="w-8 h-8 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
+                        className="flex-shrink-0 w-7 h-7 rounded-full object-cover border-2 border-white shadow-md"
                       />
                     ) : (
-                      <div className="w-10 h-10 rounded-full border-2 border-white/50 bg-gradient-to-br from-black-200 to-indigo-600 text-white/80 text-xs flex items-center justify-center shadow-md flex-shrink-0">
-                        You
+                      <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-md ring-2 ring-indigo-300">
+                        {userInitial}
                       </div>
                     )}
-
                     <div
-                      className={`max-w-[75%] px-4 py-3 mt-5 shadow-sm ${item.type === "question"
-                        ? "bg-primary/10 border text-foreground rounded-tr-4xl rounded-bl-4xl rounded-br-4xl"
-                        : "bg-muted border text-muted-foreground rounded-tl-4xl rounded-bl-4xl rounded-br-4xl"
+                      className={`max-w-[75%] rounded-xl px-3 py-2 ${item.type === "question"
+                        ? "bg-gray-100 text-gray-900 rounded-tl-none shadow-md border border-gray-200"
+                        : "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-tr-none shadow-md"
                         }`}
                     >
-                      <p className="text-xs leading-relaxed leading-relaxed whitespace-pre-wrap">
-                        {item.text || "..."}
-                      </p>
+                      <p className="text-xs leading-relaxed">{item.text || "..."}</p>
                     </div>
                   </div>
                 ))
               )}
+              <div ref={transcriptEndRef} />
             </div>
+
+            {/* Fallback Text Input - Mobile */}
+            {useFallbackInput && phase === 'LISTENING' && questionReady && (
+              <div className="px-3 pb-3 border-t border-border/80 pt-3">
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2 mb-2 text-xs text-yellow-800">
+                  Voice input unavailable. Please type your answer below.
+                </div>
+                <textarea
+                  value={manualAnswer}
+                  onChange={(e) => setManualAnswer(e.target.value)}
+                  placeholder="Type your answer here..."
+                  className="w-full p-3 rounded-lg border border-border bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  rows={4}
+                />
+              </div>
+            )}
           </Card>
 
           {/* Mobile Floating Controls */}
@@ -1557,7 +1774,7 @@ export default function InterviewRoomPage() {
 
             {/* Auto-Submit Countdown Banner – user can still speak to cancel */}
             {isRecording && silenceCountdown !== null && (
-              <div className="absolute -top-0.6 right-0 -translate-x-1/2 pointer-events-none">
+              <div className="absolute bottom-25 left-1/2 -translate-x-1/2 pointer-events-none">
                 <div className="bg-black text-white text-xs px-3 py-1.5 rounded-lg shadow-lg border border-white/40 animate-pulse">
                   <p className="text-sm font-bold opacity-95">
                     Auto-submitting in {silenceCountdown}s — speak now to continue
@@ -1585,14 +1802,14 @@ export default function InterviewRoomPage() {
                 {phase === 'QUESTION' && (
                   <div className="px-6 py-3">
                     <div className="inline-flex items-center gap-2 text-sm font-medium text-white/90">
-                      <Sparkles className="w-4 h-4 animate-pulse" />
-                      <span>Question being asked... Please wait</span>
+                      <Mic className="w-4 h-4 animate-pulse" />
+                      {/* <span>Question being asked... Please wait</span> */}
                     </div>
                   </div>
                 )}
 
-                {/* Mic Button - Only show when in LISTENING phase */}
-                {phase === 'LISTENING' && questionReady && (
+                {/* Mic Button - Only show when in LISTENING phase and not using fallback */}
+                {phase === 'LISTENING' && questionReady && !useFallbackInput && (
                   <Button
                     size="lg"
                     variant="ghost"
@@ -1600,10 +1817,9 @@ export default function InterviewRoomPage() {
                     disabled={isRecording}
                     className={`
               relative w-14 h-14 rounded-full p-0 transition-all duration-300
-              ${
-                        isRecording
-                          ? "bg-black-600 text-blue hover:bg-black-700 shadow-lg ring-8 ring-gray-500/30"
-                          : "bg-white text-gray-900 hover:scale-105 shadow-xl"
+              ${isRecording
+                        ? "bg-black-600 text-blue hover:bg-black-700 shadow-lg ring-8 ring-gray-500/30"
+                        : "bg-white text-gray-900 hover:scale-105 shadow-xl"
                       }
             `}
                   >
@@ -1646,6 +1862,32 @@ export default function InterviewRoomPage() {
                     ) : (
                       <Mic className="w-7 h-7" />
                     )}
+                  </Button>
+                )}
+
+                {/* Fallback Text Input Button - Show when voice not supported */}
+                {phase === 'LISTENING' && questionReady && useFallbackInput && (
+                  <Button
+                    size="lg"
+                    onClick={() => {
+                      const answer = manualAnswer.trim();
+                      if (answer) {
+                        currentAnswer.current = answer;
+                        setManualAnswer("");
+                        submitAnswer();
+                      }
+                    }}
+                    disabled={!manualAnswer.trim()}
+                    className="
+              bg-gradient-to-r from-green-500 to-green-600 
+              hover:from-green-600 hover:to-green-700 
+              shadow-xl hover:shadow-2xl 
+              rounded-full px-5 py-3 font-bold text-sm
+              transition-all duration-300
+              disabled:opacity-50 disabled:cursor-not-allowed
+            "
+                  >
+                    Submit Answer
                   </Button>
                 )}
 
